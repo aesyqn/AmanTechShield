@@ -28,9 +28,9 @@ export function TeamMemberCard({
       <p className="text-sm text-cyan-400 mb-3 font-medium">{role}</p>
 
       {/* Email */}
-      <a href={`mailto:${email}`} className="inline-flex items-center space-x-2 text-sm text-gray-400 hover:text-cyan-400 transition-colors">
-        <MailIcon className="w-4 h-4" />
-        <span>{email}</span>
+      <a href={`mailto:${email}`} className="inline-flex items-center justify-center space-x-1 text-xs text-gray-400 hover:text-cyan-400 transition-colors px-2">
+        <MailIcon className="w-3 h-3 flex-shrink-0" />
+        <span className="break-all">{email}</span>
       </a>
     </div>;
 }

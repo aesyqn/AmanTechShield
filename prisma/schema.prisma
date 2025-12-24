@@ -1,0 +1,86 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+
+model User {
+  id        String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  email     String         @unique
+  password  String
+  position  String
+  createdAt DateTime       @default(now())
+  audits    AuditSession[]
+}
+
+model AuditSession {
+  id               String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String                    @db.Uuid
+  user             User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  targetUrl        String
+  overallRiskScore Float?
+  severity         String?
+  createdAt        DateTime                  @default(now())
+  penTests         PenetrationTestResult[]
+  phishingScans    PhishingAnalysis[]
+  idsLogs          IDSLab[]
+  ethics           IslamicEthicsEvaluation?
+  recoveryPlan     RecoveryPlan?
+  report           AuditReport?
+}
+
+model PenetrationTestResult {
+  id                String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  auditId           String       @db.Uuid
+  audit             AuditSession @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  vulnerabilityType String
+  technicalRisk     Int
+}
+
+model PhishingAnalysis {
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  auditId          String       @db.Uuid
+  audit            AuditSession @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  detectedKeywords String[]
+  isPhishing       Boolean      @default(false)
+}
+
+model IDSLab {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  auditId        String       @db.Uuid
+  audit          AuditSession @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  anomaliesFound String?
+  failedAttempts Int          @default(0)
+}
+
+model IslamicEthicsEvaluation {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  auditId         String       @unique @db.Uuid
+  audit           AuditSession @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  amanahScore     Float?
+  maslahahScore   Float?
+  complianceLevel String?
+}
+
+model RecoveryPlan {
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  auditId          String       @unique @db.Uuid
+  audit            AuditSession @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  actionSteps      String?
+  disclosurePolicy String?
+}
+
+model AuditReport {
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  auditId       String       @unique @db.Uuid
+  audit         AuditSession @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  reportFileUrl String
+  generatedAt   DateTime     @default(now())
+}

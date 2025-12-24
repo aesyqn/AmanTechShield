@@ -48,7 +48,7 @@ export const teamMembers = [{
   name: 'Nor Asyiqin Nazirah Binti Rapandi',
   role: 'Chief Executive Officer',
   email: 'nor_asyiqin_bi22@iluv.ums.edu.my',
-  image: 'https://api.dicebear.com/7.x/avataaars/svg?seed=NorAsyiqin&backgroundColor=00d9ff'
+  image: '/src/assets/asyiqin.JPG'
 }, {
   id: 2,
   name: 'Nurul Aishah Irdina Binti Rahman',
@@ -59,8 +59,8 @@ export const teamMembers = [{
   id: 3,
   name: 'Nuruldiana Binti Zaidi',
   role: 'Head of Security Operations',
-  email: 'nuruldiana.zaidi@amantechshield.tech',
-  image: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Nuruldiana&backgroundColor=00d9ff'
+  email: 'nuruldiana_ti_bi22@iluv.ums.edu.my',
+  image: '/src/assets/diana.jpg'
 }, {
   id: 4,
   name: 'Mohamad Denish Jumad Bin Jamil',
@@ -83,8 +83,8 @@ export const teamMembers = [{
   id: 7,
   name: 'Afiqah Binti Ahmad Fairuze',
   role: 'Client Success Manager',
-  email: 'afiqah.fairuze@amantechshield.tech',
-  image: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Afiqah&backgroundColor=00d9ff'
+  email: 'afiqah_ti_bi22@iluv.ums.edu.my',
+  image: '/src/assets/afiqah.jpg'
 }];
 export const trustedCompanies = ['Bank Amanah', 'Islamic Finance Corp', 'Shariah Bank', 'Takaful Insurance', 'Halal Investment Group', 'Barakah Holdings'];
 export const vulnerabilityPatterns = {
