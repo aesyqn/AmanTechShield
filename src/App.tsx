@@ -45,8 +45,8 @@ export function App() {
       });
     }
   };
-  const handleLogin = (email: string, password: string) => {
-    const success = login(email, password);
+  const handleLogin = async (email: string, password: string) => {
+    const success = await login(email, password);
     if (success) {
       setCurrentPage('scanning');
       window.scrollTo({
@@ -56,8 +56,13 @@ export function App() {
     }
     return success;
   };
-  const handleRegister = (name: string, email: string, password: string, position: string) => {
-    const success = register(name, email, password, position);
+  const handleRegister = async (
+    name: string,
+    email: string,
+    password: string,
+    position: string
+  ) => {
+    const success = await register(name, email, password, position);
     if (success) {
       setCurrentPage('scanning');
       window.scrollTo({

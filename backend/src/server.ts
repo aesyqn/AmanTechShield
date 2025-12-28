@@ -13,6 +13,7 @@ import { phishingRouter } from './modules/phishing/phishing.controller.ts';
 import { idsRouter } from './modules/ids/ids.controller.ts';
 import { riskRouter } from './modules/risk/risk.controller.ts';
 import { reportingRouter } from './modules/reporting/reporting.controller.ts';
+import { authRouter } from './modules/auth/auth.controller.ts';
 import { prisma } from './prisma.ts';
 
 dotenv.config();
@@ -28,6 +29,7 @@ app.use('/api/phishing', phishingRouter);
 app.use('/api/ids', idsRouter);
 app.use('/api/risk', riskRouter);
 app.use('/api/reporting', reportingRouter);
+app.use('/api/auth', authRouter);
 
 // Example DB-backed route using Prisma
 app.get('/api/users', async (_req, res) => {

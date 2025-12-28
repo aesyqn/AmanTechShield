@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { ShieldIcon, MailIcon, LockIcon, AlertCircleIcon } from 'lucide-react';
+import { ShieldIcon, MailIcon, LockIcon, AlertCircleIcon, EyeIcon, EyeOffIcon } from 'lucide-react';
 interface LoginPageProps {
-  onLogin: (email: string, password: string) => boolean;
+  onLogin: (email: string, password: string) => Promise<boolean>;
   onNavigateToRegister: () => void;
 }
 export function LoginPage({
@@ -12,7 +12,8 @@ export function LoginPage({
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const handleSubmit = (e: React.FormEvent) => {
+  const [showPassword, setShowPassword] = useState(false);
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     if (!email || !password) {
@@ -20,14 +21,16 @@ export function LoginPage({
       return;
     }
     setIsLoading(true);
-    // Simulate API call
-    setTimeout(() => {
-      const success = onLogin(email, password);
-      setIsLoading(false);
+    try {
+      const success = await onLogin(email, password);
       if (!success) {
         setError('Invalid credentials. Please try again.');
       }
-    }, 1000);
+    } catch {
+      setError('An unexpected error occurred. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
   return <div className="min-h-screen w-full flex items-center justify-center px-4 py-20 cyber-grid">
       <div className="w-full max-w-md">
@@ -69,7 +72,24 @@ export function LoginPage({
               </label>
               <div className="relative">
                 <LockIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-gray-800/50 border border-gray-600 rounded-lg focus:outline-none focus:border-cyan-500 transition-colors text-white" placeholder="••••••••" />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  className="w-full pl-10 pr-10 py-3 bg-gray-800/50 border border-gray-600 rounded-lg focus:outline-none focus:border-cyan-500 transition-colors text-white"
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(prev => !prev)}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-200"
+                >
+                  {showPassword ? (
+                    <EyeOffIcon className="w-5 h-5" />
+                  ) : (
+                    <EyeIcon className="w-5 h-5" />
+                  )}
+                </button>
               </div>
             </div>
 

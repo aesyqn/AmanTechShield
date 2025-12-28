@@ -1,49 +1,89 @@
 import { useState, useEffect } from 'react';
+
 interface User {
   name: string;
   email: string;
   position: string;
 }
+
+const API_BASE = 'http://localhost:4000';
+
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   useEffect(() => {
-    // Check for stored user session
     const storedUser = localStorage.getItem('user');
     if (storedUser) {
       setUser(JSON.parse(storedUser));
       setIsAuthenticated(true);
     }
   }, []);
-  const login = (email: string, password: string): boolean => {
-    // Simulate login (in real app, validate against backend)
-    if (email && password) {
-      const newUser = {
-        name: email.split('@')[0],
-        email,
-        position: 'Security Auditor'
+
+  const login = async (email: string, password: string): Promise<boolean> => {
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ email, password })
+      });
+
+      if (!response.ok) {
+        return false;
+      }
+
+      const data = (await response.json()) as User;
+      const newUser: User = {
+        name: data.name,
+        email: data.email,
+        position: data.position
       };
+
       setUser(newUser);
       setIsAuthenticated(true);
       localStorage.setItem('user', JSON.stringify(newUser));
       return true;
+    } catch (error) {
+      console.error('Login failed', error);
+      return false;
     }
-    return false;
   };
-  const register = (name: string, email: string, password: string, position: string): boolean => {
-    // Simulate registration
-    if (name && email && password && position) {
-      const newUser = {
-        name,
-        email,
-        position
+
+  const register = async (
+    name: string,
+    email: string,
+    password: string,
+    position: string
+  ): Promise<boolean> => {
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name, email, password, position })
+      });
+
+      if (!response.ok) {
+        return false;
+      }
+
+      const data = (await response.json()) as User;
+      const newUser: User = {
+        name: data.name,
+        email: data.email,
+        position: data.position
       };
+
       setUser(newUser);
       setIsAuthenticated(true);
       localStorage.setItem('user', JSON.stringify(newUser));
       return true;
+    } catch (error) {
+      console.error('Registration failed', error);
+      return false;
     }
-    return false;
   };
   const logout = () => {
     setUser(null);
