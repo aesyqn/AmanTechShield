@@ -7,9 +7,11 @@
     "dev": "npx vite",
     "build": "npx vite build",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
-    "preview": "npx vite preview"
+    "preview": "npx vite preview",
+    "backend:dev": "tsx --env-file=.env backend/src/server.ts"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "^7.2.0",
     "@prisma/client": "^7.2.0",
     "cors": "^2.8.5",
     "express": "^5.2.1",
@@ -35,6 +37,7 @@
     "prisma": "^7.2.0",
     "tailwindcss": "3.4.17",
     "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^5.2.0"
   }

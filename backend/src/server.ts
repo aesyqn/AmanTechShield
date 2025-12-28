@@ -8,11 +8,12 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
-import { penTestRouter } from './modules/penTest/penTest.controller';
-import { phishingRouter } from './modules/phishing/phishing.controller';
-import { idsRouter } from './modules/ids/ids.controller';
-import { riskRouter } from './modules/risk/risk.controller';
-import { reportingRouter } from './modules/reporting/reporting.controller';
+import { penTestRouter } from './modules/penTest/penTest.controller.ts';
+import { phishingRouter } from './modules/phishing/phishing.controller.ts';
+import { idsRouter } from './modules/ids/ids.controller.ts';
+import { riskRouter } from './modules/risk/risk.controller.ts';
+import { reportingRouter } from './modules/reporting/reporting.controller.ts';
+import { prisma } from './prisma.ts';
 
 dotenv.config();
 
@@ -27,6 +28,17 @@ app.use('/api/phishing', phishingRouter);
 app.use('/api/ids', idsRouter);
 app.use('/api/risk', riskRouter);
 app.use('/api/reporting', reportingRouter);
+
+// Example DB-backed route using Prisma
+app.get('/api/users', async (_req, res) => {
+  try {
+    const users = await prisma.user.findMany();
+    res.json(users);
+  } catch (error) {
+    console.error('Error fetching users', error);
+    res.status(500).json({ error: 'Failed to fetch users from database' });
+  }
+});
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'AmanTech backend' });
