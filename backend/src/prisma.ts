@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import prismaPkg from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 const connectionString = process.env.DATABASE_URL;
@@ -8,5 +8,6 @@ if (!connectionString) {
 }
 
 const adapter = new PrismaPg({ connectionString });
+const { PrismaClient } = prismaPkg;
 
 export const prisma = new PrismaClient({ adapter });

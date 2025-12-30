@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StepIndicator } from '../components/StepIndicator';
 import { FileUpload } from '../components/FileUpload';
 import { VulnerabilityList } from '../components/VulnerabilityList';
 import { RiskScoreDisplay } from '../components/RiskScoreDisplay';
 import { detectPenetrationVulnerabilities, detectPhishing, analyzeIDSLogs, calculateRiskScore, Vulnerability, extractTextFromFile } from '../utils/vulnerabilityDetector';
+import { generateRecoveryPlan, RecoveryPlanItem } from '../utils/recoveryPlan';
 import { generatePDFReport, generatePDFHTML, downloadTextReport, downloadPDFReport } from '../utils/pdfGenerator';
 import { AlertCircleIcon, CheckCircleIcon, DownloadIcon, ArrowRightIcon, ArrowLeftIcon, FileTextIcon } from 'lucide-react';
 interface ScanningFlowProps {
@@ -40,6 +41,9 @@ export function ScanningFlow({
   const [idsScanning, setIdsScanning] = useState(false);
   // Step 4: Risk Scoring
   const [riskScore, setRiskScore] = useState<any>(null);
+  // Step 5: Recovery Plan
+  const [recoveryPlan, setRecoveryPlan] = useState<RecoveryPlanItem[]>([]);
+  const [recoveryGenerating, setRecoveryGenerating] = useState(false);
   const steps = ['Penetration Test', 'Phishing Detection', 'IDS Analysis', 'Risk Scoring', 'Recovery Plan'];
   const handlePenTest = () => {
     if (!targetUrl) {
@@ -120,6 +124,17 @@ export function ScanningFlow({
     const score = calculateRiskScore(allVulnerabilities);
     setRiskScore(score);
   };
+
+  const handleGenerateRecoveryPlan = () => {
+    if (!riskScore || allVulnerabilities.length === 0) return;
+    setRecoveryGenerating(true);
+    // Small delay to feel more like an AI generation step
+    setTimeout(() => {
+      const plan = generateRecoveryPlan(allVulnerabilities, riskScore);
+      setRecoveryPlan(plan);
+      setRecoveryGenerating(false);
+    }, 800);
+  };
   const handleDownloadTextReport = () => {
     if (!user) return;
     const report = generatePDFReport(allVulnerabilities, {
@@ -159,6 +174,12 @@ export function ScanningFlow({
   const prevStep = () => {
     setCurrentStep(prev => Math.max(prev - 1, 0));
   };
+
+  useEffect(() => {
+    if (currentStep === 4 && riskScore && !recoveryPlan.length && !recoveryGenerating) {
+      handleGenerateRecoveryPlan();
+    }
+  }, [currentStep, riskScore, recoveryPlan.length, recoveryGenerating]);
   return <div className="min-h-screen w-full py-24 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto">
         {/* Header */}
@@ -360,6 +381,89 @@ export function ScanningFlow({
                   Generate your comprehensive security report with ethical
                   disclosure policy and recovery steps.
                 </p>
+              </div>
+
+              {/* AI-style Recovery Plan Generation */}
+              <div className="glass p-6 rounded-xl mb-4">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-lg font-semibold">AI-Assisted Recovery Plan</h3>
+                    <p className="text-gray-400 text-sm">
+                      Suggested remediation actions generated from detected vulnerabilities and risk scores.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleGenerateRecoveryPlan}
+                    disabled={recoveryGenerating || !riskScore || allVulnerabilities.length === 0}
+                    className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-lg text-sm font-semibold hover:shadow-lg hover:shadow-cyan-500/40 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                  >
+                    {recoveryGenerating ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4 mr-1" viewBox="0 0 24 24">
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                            fill="none"
+                          />
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          />
+                        </svg>
+                        <span>Generating...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Generate Recovery Plan</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {recoveryPlan.length === 0 && !recoveryGenerating && (
+                  <p className="text-gray-400 text-sm">
+                    No recovery plan has been generated yet. Click the button above to generate suggested actions.
+                  </p>
+                )}
+
+                {recoveryPlan.length > 0 && (
+                  <div className="grid md:grid-cols-3 gap-4 mt-4 text-left">
+                    {(['immediate', 'short_term', 'long_term'] as const).map(phase => {
+                      const items = recoveryPlan.filter(item => item.phase === phase);
+                      if (!items.length) return null;
+                      const titleMap: Record<typeof phase, string> = {
+                        immediate: 'Immediate (0-24 hours)',
+                        short_term: 'Short-term (1-7 days)',
+                        long_term: 'Long-term (1-3 months)',
+                      } as const;
+                      return (
+                        <div key={phase} className="bg-gray-900/40 border border-gray-700 rounded-lg p-4">
+                          <h4 className="text-sm font-semibold mb-3 text-cyan-300">
+                            {titleMap[phase]}
+                          </h4>
+                          <ul className="space-y-3 text-sm text-gray-300">
+                            {items.map(item => (
+                              <li key={item.id} className="border-l-2 border-cyan-500/60 pl-3">
+                                <p className="font-semibold mb-1">{item.title}</p>
+                                <p className="text-gray-400 text-xs mb-1">{item.description}</p>
+                                {item.stakeholders.length > 0 && (
+                                  <p className="text-[11px] text-gray-500">
+                                    Stakeholders: {item.stakeholders.join(', ')}
+                                  </p>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className="glass p-8 rounded-xl text-center">

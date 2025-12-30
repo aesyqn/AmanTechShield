@@ -43,9 +43,18 @@ Create a free **Supabase** account at https://supabase.com (no install needed, j
 
 You do **not** need to change these files again if they already work – just know they exist.
 
-### 3. Set up the Supabase database
+### 3. Set up the Supabase database (team options)
 
-1. Log in to Supabase and create a **new project**.
+You have **two ways** to work as a team:
+
+- **Option A – Each developer has their own Supabase project**
+- **Option B – Everyone shares one Supabase project and database**
+
+Both are supported. Choose the one your team prefers.
+
+#### 3.1 Option A – Each developer creates their own Supabase project
+
+1. Log in to Supabase and create a **new project** in your own account.
 2. In the project, go to **Database** → **Connection string** (or similar).
 3. Copy the **PostgreSQL connection string**. It looks like:
 	```
@@ -56,10 +65,44 @@ You do **not** need to change these files again if they already work – just kn
 	DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@db.xxx.supabase.co:5432/postgres"
 	BACKEND_PORT=4000
 	```
-	- Replace `YOUR_PASSWORD` and `db.xxx.supabase.co` with your real values from Supabase.
+	- Replace `YOUR_PASSWORD` and `db.xxx.supabase.co` with your real values from **your** Supabase project.
 	- Keep the format exactly the same.
 
 > Tip: If your password has special characters like `@`, you can either URL‑encode them or use a simpler password when you create the Supabase project.
+
+#### 3.2 Option B – Everyone shares one Supabase project (recommended for group demos)
+
+This is useful if **one person** already has a working Supabase project and wants to let friends/teammates connect to the **same** database.
+
+**Owner steps (only one person does this):**
+
+1. In Supabase, open your existing project and (optionally) **rotate the database password** to a long, URL‑safe value.
+2. Copy the updated **PostgreSQL connection string** from Supabase.
+3. On your laptop, in the project root, set up `.env` with:
+	```env
+	DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@db.xxx.supabase.co:5432/postgres"
+	BACKEND_PORT=4000
+	```
+4. Confirm the backend runs correctly by starting `npm run backend:dev` and checking it connects to the database.
+5. Add your friends as **members/admins** in the same Supabase project (Settings → Members) so they can see tables if needed.
+6. Share the **exact connection string** with teammates using a **secure channel** (password manager, private message, etc.). Never paste it into Git, screenshots, or public docs.
+
+**Teammate steps (each friend does this on their own laptop):**
+
+1. Clone or pull the repo and run `npm install` from the project root.
+2. At the **project root** (same folder as `package.json`), create a `.env` file.
+3. Paste the shared connection string into `.env` as:
+	```env
+	DATABASE_URL="postgresql://postgres:SHARED_PASSWORD@db.xxx.supabase.co:5432/postgres"
+	BACKEND_PORT=4000
+	```
+4. Save the file and make sure it is **not committed** (it should already be in `.gitignore`).
+5. Run `npm run backend:dev` and check that:
+	- You see `Backend server running on port 4000`.
+	- Hitting `http://localhost:4000/api/users` returns data (or `[]`).
+6. Run `npm run dev` for the frontend and verify you can see / create data in the shared database.
+
+> Team note: Because everyone is using the **same** database, any destructive changes or test data affect the whole group. Coordinate schema changes and consider adding your name or initials into test records so you can tell who created what.
 
 ### 4. Install dependencies
 

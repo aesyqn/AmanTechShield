@@ -46,6 +46,20 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'AmanTech backend' });
 });
 
-app.listen(port, () => {
-  console.log(`Backend server running on port ${port}`);
-});
+// Start server with an explicit DB connection check so we can see
+// in the terminal whether the database is reachable.
+const startServer = async () => {
+  try {
+    console.log('Checking database connection...');
+    await prisma.$connect();
+    console.log('✅ Database connection established successfully.');
+  } catch (error) {
+    console.error('❌ Failed to connect to the database:', error);
+  }
+
+  app.listen(port, () => {
+    console.log(`Backend server running on port ${port}`);
+  });
+};
+
+startServer();

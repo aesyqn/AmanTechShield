@@ -8,18 +8,25 @@ From the project root:
 
 ```bash
 npm install
+npx prisma generate
 ```
+
+The `npx prisma generate` command makes sure the Prisma Client is generated correctly on a fresh clone so the backend can talk to the database.
 
 ### 2. Configure the database (Supabase)
 
-1. Create a free Supabase project.
-2. Copy the **PostgreSQL connection string** from Supabase.
-3. In the project root, create a `.env` file and add:
+You can either:
+
+- **Each developer uses their own Supabase project**, or
+- **Everyone shares a single Supabase project and database** (recommended for group demos).
+
+1. Follow the detailed steps in [backend/README.md](backend/README.md) under "Set up the Supabase database (team options)" to choose your approach.
+2. In all cases, you will end up with a `.env` file in the project root that contains at least:
 	```env
-	DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@db.xxx.supabase.co:5432/postgres"
+	DATABASE_URL="postgresql://postgres:YOUR_PASSWORD_OR_SHARED_PASSWORD@db.xxx.supabase.co:5432/postgres"
 	BACKEND_PORT=4000
 	```
-	Replace with the real values from Supabase. For more detail, see the backend guide in [backend/README.md](backend/README.md).
+3. You can also copy and edit `.env.example` in the project root as a starting point.
 
 ### 3. Run the backend (API + DB)
 
