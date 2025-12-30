@@ -1,4 +1,4 @@
-import { prisma } from '../../prisma';
+import { prisma } from '../../prisma.ts';
 
 // Severity mapping for technical risk calculation
 const SEVERITY_WEIGHTS = {

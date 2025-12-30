@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { calculateRiskScore } from './risk.service';
+import { calculateRiskScore } from './risk.service.ts';
 
 export const riskRouter = Router();
 

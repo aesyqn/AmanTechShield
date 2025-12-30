@@ -10,7 +10,7 @@ import dotenv from 'dotenv';
 
 import { penTestRouter } from './modules/penTest/penTest.controller.ts';
 import { phishingRouter } from './modules/phishing/phishing.controller.ts';
-import { idsRouter } from './modules/ids/ids.controller.ts';
+import { idsRouter } from './modules/ids/ids.code.ts';
 import { riskRouter } from './modules/risk/risk.controller.ts';
 import { reportingRouter } from './modules/reporting/reporting.controller.ts';
 import { authRouter } from './modules/auth/auth.controller.ts';
@@ -39,6 +39,29 @@ app.get('/api/users', async (_req, res) => {
   } catch (error) {
     console.error('Error fetching users', error);
     res.status(500).json({ error: 'Failed to fetch users from database' });
+  }
+});
+
+// Create audit session
+app.post('/api/audit-session', async (req, res) => {
+  try {
+    const { userId, targetUrl } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    const auditSession = await prisma.auditSession.create({
+      data: {
+        userId,
+        targetUrl: targetUrl || 'pending'
+      }
+    });
+
+    res.json(auditSession);
+  } catch (error) {
+    console.error('Error creating audit session', error);
+    res.status(500).json({ error: 'Failed to create audit session' });
   }
 });
 
