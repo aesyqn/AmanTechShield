@@ -3,13 +3,14 @@ import { StepIndicator } from '../components/StepIndicator';
 import { FileUpload } from '../components/FileUpload';
 import { VulnerabilityList } from '../components/VulnerabilityList';
 import { RiskScoreDisplay } from '../components/RiskScoreDisplay';
-import { detectPenetrationVulnerabilities, detectPhishing, analyzeIDSLogs, calculateRiskScore, Vulnerability, extractTextFromFile } from '../utils/vulnerabilityDetector';
+import { detectPenetrationVulnerabilities, detectPhishing, analyzeIDSLogs, Vulnerability, extractTextFromFile } from '../utils/vulnerabilityDetector';
 import { generateRecoveryPlan, RecoveryPlanItem } from '../utils/recoveryPlan';
 import { generatePDFReport, generatePDFHTML, downloadTextReport, downloadPDFReport } from '../utils/pdfGenerator';
 import { AlertCircleIcon, CheckCircleIcon, DownloadIcon, ArrowRightIcon, ArrowLeftIcon, FileTextIcon } from 'lucide-react';
 interface ScanningFlowProps {
   user: {
     name: string;
+    email: string;
     position: string;
   } | null;
   onComplete: () => void;
@@ -20,6 +21,7 @@ export function ScanningFlow({
 }: ScanningFlowProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [allVulnerabilities, setAllVulnerabilities] = useState<Vulnerability[]>([]);
+  const [auditId, setAuditId] = useState<string | null>(null);
   // Step 1: Penetration Test
   const [targetUrl, setTargetUrl] = useState('');
   const [penTestResults, setPenTestResults] = useState<Vulnerability[]>([]);
@@ -45,6 +47,57 @@ export function ScanningFlow({
   const [recoveryPlan, setRecoveryPlan] = useState<RecoveryPlanItem[]>([]);
   const [recoveryGenerating, setRecoveryGenerating] = useState(false);
   const steps = ['Penetration Test', 'Phishing Detection', 'IDS Analysis', 'Risk Scoring', 'Recovery Plan'];
+
+  // Create audit session on component mount or when starting first test
+  useEffect(() => {
+    const createAuditSession = async () => {
+      if (!auditId && user) {
+        try {
+          console.log('Creating audit session for user:', user.email);
+
+          const userResponse = await fetch('http://localhost:4000/api/users');
+          if (!userResponse.ok) {
+            console.error('Failed to fetch users:', userResponse.status);
+            return;
+          }
+
+          const users = await userResponse.json();
+          const currentUser = users.find((u: any) => u.email === user.email);
+
+          if (!currentUser) {
+            console.error('User not found in database. User email:', user.email);
+            console.log('Available emails:', users.map((u: any) => u.email));
+            return;
+          }
+
+          console.log('Found user in database:', currentUser.id);
+
+          const response = await fetch('http://localhost:4000/api/audit-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: currentUser.id,
+              targetUrl: targetUrl || 'pending'
+            })
+          });
+
+          if (response.ok) {
+            const audit = await response.json();
+            setAuditId(audit.id);
+            console.log('✅ Audit session created successfully:', audit.id);
+          } else {
+            const errorText = await response.text();
+            console.error('Failed to create audit session:', response.status, errorText);
+          }
+        } catch (error) {
+          console.error('Error creating audit session:', error);
+        }
+      }
+    };
+
+    createAuditSession();
+  }, [user]);
+
   const handlePenTest = () => {
     if (!targetUrl) {
       alert('Please enter a target URL');
@@ -102,27 +155,95 @@ export function ScanningFlow({
       alert('Error analyzing content. Please try again.');
     }
   };
-  const handleIDSAnalysis = () => {
+  const handleIDSAnalysis = async () => {
     if (!idsFile) {
       alert('Please upload a log file');
       return;
     }
+
+    if (!auditId) {
+      alert('Audit session not initialized. Please refresh and try again.');
+      return;
+    }
+
     setIdsScanning(true);
-    const reader = new FileReader();
-    reader.onload = e => {
-      const content = e.target?.result as string;
-      setTimeout(() => {
-        const vulnerabilities = analyzeIDSLogs(content);
-        setIdsResults(vulnerabilities);
-        setAllVulnerabilities(prev => [...prev, ...vulnerabilities]);
-        setIdsScanning(false);
-      }, 2000);
-    };
-    reader.readAsText(idsFile);
+
+    try {
+      // Create FormData to send file to backend
+      const formData = new FormData();
+      formData.append('file', idsFile);
+      formData.append('auditId', auditId);
+
+      const response = await fetch('http://localhost:4000/api/ids/analyze-logs', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to analyze logs');
+      }
+
+      const result = await response.json();
+
+      // Convert backend findings to frontend Vulnerability format
+      const vulnerabilities: Vulnerability[] = result.findings.map((finding: any) => ({
+        id: finding.id,
+        type: finding.title,
+        severity: finding.severity.toLowerCase() as 'critical' | 'high' | 'medium' | 'low',
+        description: finding.description,
+        technicalRisk: finding.severity === 'Critical' ? 5 : finding.severity === 'High' ? 4 : finding.severity === 'Medium' ? 3 : 2,
+        ethicalRisk: 3,
+        recommendation: finding.recommendation,
+        ethicalImplication: 'Intrusion attempts violate user privacy and system integrity. Protecting against unauthorized access is essential.'
+      }));
+
+      setIdsResults(vulnerabilities);
+      setAllVulnerabilities(prev => [...prev, ...vulnerabilities]);
+      setIdsScanning(false);
+
+      console.log('IDS Analysis saved to database:', result);
+    } catch (error) {
+      console.error('Error analyzing logs:', error);
+      setIdsScanning(false);
+      alert('Error analyzing logs. Please check if the backend is running and try again.');
+    }
   };
-  const calculateRisk = () => {
-    const score = calculateRiskScore(allVulnerabilities);
-    setRiskScore(score);
+  const calculateRisk = async () => {
+    if (!auditId) {
+      alert('Audit session not initialized. Please refresh and try again.');
+      return;
+    }
+
+    try {
+      console.log('Calculating risk score for audit:', auditId);
+
+      const response = await fetch('http://localhost:4000/api/risk/calculate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auditId })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to calculate risk score');
+      }
+
+      const result = await response.json();
+      console.log('✅ Risk score calculated and saved:', result);
+
+      // Convert backend format to frontend format
+      setRiskScore({
+        overall: result.overall_score,
+        technical: result.technical_score,
+        ethical: result.ethical_score,
+        critical: result.severity_counts.critical,
+        high: result.severity_counts.high,
+        medium: result.severity_counts.medium,
+        low: result.severity_counts.low
+      });
+    } catch (error) {
+      console.error('Error calculating risk score:', error);
+      alert('Error calculating risk score. Please check if the backend is running.');
+    }
   };
 
   const handleGenerateRecoveryPlan = () => {

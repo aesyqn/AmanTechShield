@@ -1,0 +1,36 @@
+2025-01-15 02:34:12 ERROR Login failed for user admin from IP 192.168.1.100
+2025-01-15 02:34:45 ERROR Login failed for user admin from IP 192.168.1.100
+2025-01-15 02:35:12 ERROR Login failed for user admin from IP 192.168.1.100
+2025-01-15 02:35:48 ERROR Login failed for user admin from IP 192.168.1.100
+2025-01-15 02:36:23 ERROR Login failed for user admin from IP 192.168.1.100
+2025-01-15 02:36:55 ERROR Login failed for user admin from IP 192.168.1.100
+2025-01-15 02:37:34 ERROR Login failed for user admin from IP 192.168.1.100
+2025-01-15 03:15:22 INFO User john.doe logged in from IP 203.45.67.89
+2025-01-15 03:16:45 WARNING Large data transfer detected: user john.doe downloaded 150 MB
+2025-01-15 03:45:10 INFO User alice.smith logged in from IP 10.0.0.50
+2025-01-15 04:22:33 ERROR Login failed for user root from IP 45.123.67.200
+2025-01-15 04:22:56 ERROR Login failed for user root from IP 45.123.67.200
+2025-01-15 04:23:12 ERROR Login failed for user root from IP 45.123.67.200
+2025-01-15 04:23:45 ERROR Login failed for user root from IP 45.123.67.200
+2025-01-15 04:24:01 ERROR Login failed for user root from IP 45.123.67.200
+2025-01-15 04:24:23 ERROR Login failed for user root from IP 45.123.67.200
+2025-01-15 04:24:44 ERROR Login failed for user root from IP 45.123.67.200
+2025-01-15 04:25:11 ERROR Login failed for user root from IP 45.123.67.200
+2025-01-15 04:25:38 ERROR Login failed for user root from IP 45.123.67.200
+2025-01-15 04:26:02 ERROR Login failed for user root from IP 45.123.67.200
+2025-01-15 04:26:29 ERROR Login failed for user root from IP 45.123.67.200
+2025-01-15 04:26:55 ERROR Login failed for user root from IP 45.123.67.200
+2025-01-15 14:30:12 INFO User bob.jones logged in from IP 192.168.1.25
+2025-01-15 15:45:33 INFO User sarah.williams logged in from IP 192.168.1.30
+2025-01-15 23:15:44 WARNING User unknown.user logged in from IP 103.45.78.210 at unusual time
+2025-01-15 23:20:11 INFO Access from IP 103.45.78.210
+2025-01-15 23:25:33 INFO Access from IP 103.45.78.210
+2025-01-15 23:30:12 INFO Access from IP 103.45.78.210
+2025-01-15 23:35:45 INFO Access from IP 103.45.78.210
+2025-01-15 23:40:22 INFO Access from IP 103.45.78.210
+2025-01-15 23:45:11 INFO Access from IP 103.45.78.210
+2025-01-15 23:50:33 INFO Access from IP 103.45.78.210
+2025-01-15 23:55:12 INFO Access from IP 103.45.78.210
+2025-01-16 00:00:44 INFO Access from IP 103.45.78.210
+2025-01-16 00:05:22 INFO Access from IP 103.45.78.210
+2025-01-16 00:10:11 CRITICAL Access from IP 103.45.78.210

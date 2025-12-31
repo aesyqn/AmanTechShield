@@ -1,0 +1,8 @@
+[2024-01-18 23:15:44] WARNING - User james.wilson logged in from 45.33.52.91 - After hours access
+[2024-01-18 23:18:22] INFO - User james.wilson accessed database employee_records from 45.33.52.91
+[2024-01-18 23:22:55] INFO - User james.wilson downloaded file payroll_data_2024.csv - Size: 18.5 MB
+[2024-01-18 23:28:33] INFO - User james.wilson accessed file /confidential/salaries.xlsx from 45.33.52.91
+[2024-01-19 02:45:18] WARNING - User system_admin logged in from 203.0.113.156 - Unusual login time
+[2024-01-19 02:48:50] INFO - User system_admin accessed configuration files from 203.0.113.156
+[2024-01-19 02:52:14] INFO - User system_admin modified security settings
+

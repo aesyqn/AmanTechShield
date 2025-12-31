@@ -34,6 +34,7 @@ model AuditSession {
   ethics           IslamicEthicsEvaluation?
   recoveryPlan     RecoveryPlan?
   report           AuditReport?
+  riskScore        RiskScore?
 }
 
 model PenetrationTestResult {
@@ -83,4 +84,18 @@ model AuditReport {
   audit         AuditSession @relation(fields: [auditId], references: [id], onDelete: Cascade)
   reportFileUrl String
   generatedAt   DateTime     @default(now())
+}
+
+model RiskScore {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  auditId        String       @unique @db.Uuid
+  audit          AuditSession @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  technicalScore Float
+  ethicalScore   Float
+  overallScore   Float
+  criticalCount  Int          @default(0)
+  highCount      Int          @default(0)
+  mediumCount    Int          @default(0)
+  lowCount       Int          @default(0)
+  calculatedAt   DateTime     @default(now())
 }
