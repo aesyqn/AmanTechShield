@@ -1,14 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
+import type { Vulnerability } from '../utils/vulnerabilityDetector';
 import { StepIndicator } from '../components/StepIndicator';
 import { FileUpload } from '../components/FileUpload';
+import { analyzeIDSLogs, detectPenetrationVulnerabilities, calculateRiskScore } from '../utils/vulnerabilityDetector';
 import { VulnerabilityList } from '../components/VulnerabilityList';
 import { RiskScoreDisplay } from '../components/RiskScoreDisplay';
-import { detectPenetrationVulnerabilities, detectPhishing, analyzeIDSLogs, calculateRiskScore, Vulnerability, extractTextFromFile } from '../utils/vulnerabilityDetector';
-import { generateRecoveryPlan, RecoveryPlanItem } from '../utils/recoveryPlan';
 import { generatePDFReport, generatePDFHTML, downloadTextReport, downloadPDFReport } from '../utils/pdfGenerator';
 import { AlertCircleIcon, CheckCircleIcon, DownloadIcon, ArrowRightIcon, ArrowLeftIcon, FileTextIcon } from 'lucide-react';
 interface ScanningFlowProps {
   user: {
+    id: string
     name: string;
     position: string;
   } | null;
@@ -32,18 +33,19 @@ export function ScanningFlow({
     matches: string[];
     risk: number;
     urlMatches: string[];
+    urls: string[];
     suspiciousPatterns: string[];
   } | null>(null);
   const [phishingScanning, setPhishingScanning] = useState(false);
+  const [phishingLocked, setPhishingLocked] = useState(false); // Lock after analysis
+  const [phishingAuditId, setPhishingAuditId] = useState<string | null>(null); // Store audit ID for later DB save
+  const [phishingAnalyzedContent, setPhishingAnalyzedContent] = useState<string>(''); // Store content that was analyzed
   // Step 3: IDS
   const [idsFile, setIdsFile] = useState<File | null>(null);
   const [idsResults, setIdsResults] = useState<Vulnerability[]>([]);
   const [idsScanning, setIdsScanning] = useState(false);
   // Step 4: Risk Scoring
   const [riskScore, setRiskScore] = useState<any>(null);
-  // Step 5: Recovery Plan
-  const [recoveryPlan, setRecoveryPlan] = useState<RecoveryPlanItem[]>([]);
-  const [recoveryGenerating, setRecoveryGenerating] = useState(false);
   const steps = ['Penetration Test', 'Phishing Detection', 'IDS Analysis', 'Risk Scoring', 'Recovery Plan'];
   const handlePenTest = () => {
     if (!targetUrl) {
@@ -58,50 +60,147 @@ export function ScanningFlow({
       setPenTestScanning(false);
     }, 2000);
   };
-  const handlePhishingTest = async () => {
-    if (!phishingContent && !phishingFile) {
-      alert('Please enter content or upload a file');
-      return;
-    }
-    setPhishingScanning(true);
-    try {
-      let contentToAnalyze = phishingContent;
-      // If file is uploaded, extract text
-      if (phishingFile) {
-        const isImage = phishingFile.type.startsWith('image/');
-        const isPDF = phishingFile.type === 'application/pdf';
-        if (isImage || isPDF) {
-          // Simulate OCR/PDF text extraction
-          contentToAnalyze = await extractTextFromFile(phishingFile);
-        } else {
-          // Read text file directly
-          contentToAnalyze = await phishingFile.text();
+
+const handlePhishingTest = async () => {
+  // ✅ Guard: must be logged in (DO NOT put this outside the function)
+  if (!user) {
+    alert("You must be logged in to run phishing analysis.");
+    return;
+  }
+
+  // ✅ Check if user has ID (required after recent update)
+  if (!user.id) {
+    alert("Your session is outdated. Please log out and log back in to continue.");
+    return;
+  }
+
+  // 🔒 Prevent re-analysis if already locked
+  if (phishingLocked) {
+    alert("Phishing analysis is complete and locked. Please proceed to the next step.");
+    return;
+  }
+
+  if (!phishingContent && !phishingFile) {
+    alert("Please enter content or upload a file");
+    return;
+  }
+
+  setPhishingScanning(true);
+
+  try {
+    const auditId = crypto.randomUUID();
+    let response: Response;
+
+if (phishingFile instanceof File) {
+      // ===== FILE → analyze-file =====
+      const formData = new FormData();
+      formData.append("auditId", auditId);
+      formData.append("userId", user.id);
+      formData.append("file", phishingFile);
+      formData.append("skipDbSave", "true"); // Don't save to DB during analysis
+
+      response = await fetch(
+        "http://localhost:4000/api/phishing/analyze-file",
+        {
+          method: "POST",
+          body: formData
         }
-      }
-      setTimeout(() => {
-        const results = detectPhishing(contentToAnalyze, phishingFile?.name);
-        setPhishingResults(results);
-        if (results.isPhishing) {
-          const phishingVuln: Vulnerability = {
-            id: `PHISH-${Date.now()}`,
-            type: 'Phishing Attempt Detected',
-            severity: results.risk > 60 ? 'high' : 'medium',
-            description: `Detected ${results.matches.length} phishing keywords, ${results.urlMatches.length} suspicious URL patterns, and ${results.suspiciousPatterns.length} suspicious patterns`,
-            technicalRisk: Math.min(Math.ceil(results.risk / 20), 5),
-            ethicalRisk: 4,
-            recommendation: 'Block sender, report to security team, and educate users about phishing tactics. Implement email filtering and URL scanning.',
-            ethicalImplication: 'Phishing attempts violate user trust and can lead to identity theft and financial fraud. Protecting users from such threats is a moral obligation.'
-          };
-          setAllVulnerabilities(prev => [...prev, phishingVuln]);
+      );
+    } else {
+      // ===== TEXT → analyze-text =====
+      response = await fetch(
+        "http://localhost:4000/api/phishing/analyze-text",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auditId,
+            content: phishingContent,
+            userId: user.id,
+            skipDbSave: true  // Don't save to DB during analysis
+          })
         }
-        setPhishingScanning(false);
-      }, 1500);
-    } catch (error) {
-      console.error('Error analyzing phishing content:', error);
-      setPhishingScanning(false);
-      alert('Error analyzing content. Please try again.');
+      );
     }
-  };
+
+    // ===== DEBUG-AWARE ERROR HANDLING =====
+    if (!response.ok) {
+      let errorData: any = null;
+
+      try {
+        errorData = await response.json();
+      } catch (_) {}
+
+      console.error("❌ Backend phishing error:", {
+        status: response.status,
+        statusText: response.statusText,
+        errorData
+      });
+
+      throw new Error(
+        errorData?.message ||
+        errorData?.errorCode ||
+        `Request failed with status ${response.status}`
+      );
+    }
+
+    const result = await response.json();
+
+    // ===== MAP BACKEND RESULT TO UI =====
+    // Normalize risk score to 0-100% (max expected score is ~20 with bonuses)
+    const normalizedRisk = Math.min((result.riskScore / 20) * 100, 100);
+
+    // 🔒 Lock analysis after successful completion
+    setPhishingLocked(true);
+    setPhishingAuditId(auditId);
+
+    // Store the content that was analyzed for later DB save
+    if (phishingFile instanceof File) {
+      // For files, store the extracted text preview if available
+      setPhishingAnalyzedContent(result.extractedPreview || 'file-content');
+    } else {
+      // For text, store the actual content
+      setPhishingAnalyzedContent(phishingContent);
+    }
+
+    setPhishingResults({
+      isPhishing: result.isPhishing,
+      matches: result.detectedKeywords || [],
+      risk: normalizedRisk,
+      urlMatches: result.urlKeywords || [],
+      urls: result.urls || [],
+      suspiciousPatterns: result.detectedKeywords || []
+    });
+
+    if (result.isPhishing) {
+      const phishingVuln: Vulnerability = {
+        id: `PHISH-${Date.now()}`,
+        type: "Phishing Attempt Detected",
+        severity: result.severity === "Critical" ? "high" : "medium",
+        description: `Detected phishing indicators: ${result.detectedKeywords.join(", ")}`,
+        technicalRisk: Math.min(result.riskScore, 5),
+        ethicalRisk: 4,
+        recommendation: "Block sender, report incident, educate users.",
+        ethicalImplication:
+          "Phishing violates trust and may lead to identity theft and financial harm."
+      };
+
+      setAllVulnerabilities(prev => [...prev, phishingVuln]);
+    }
+
+  } catch (err: any) {
+    console.error("❌ Phishing detection failed:", err);
+
+    alert(
+      "Phishing analysis failed:\n\n" +
+      (err.message || "Unknown error")
+    );
+  } finally {
+    setPhishingScanning(false);
+  }
+};
+
+
   const handleIDSAnalysis = () => {
     if (!idsFile) {
       alert('Please upload a log file');
@@ -124,17 +223,6 @@ export function ScanningFlow({
     const score = calculateRiskScore(allVulnerabilities);
     setRiskScore(score);
   };
-
-  const handleGenerateRecoveryPlan = () => {
-    if (!riskScore || allVulnerabilities.length === 0) return;
-    setRecoveryGenerating(true);
-    // Small delay to feel more like an AI generation step
-    setTimeout(() => {
-      const plan = generateRecoveryPlan(allVulnerabilities, riskScore);
-      setRecoveryPlan(plan);
-      setRecoveryGenerating(false);
-    }, 800);
-  };
   const handleDownloadTextReport = () => {
     if (!user) return;
     const report = generatePDFReport(allVulnerabilities, {
@@ -153,7 +241,7 @@ export function ScanningFlow({
     }, riskScore);
     downloadPDFReport(htmlContent, `AmanTech_Shield_Security_Report_${Date.now()}.pdf`);
   };
-  const nextStep = () => {
+  const nextStep = async () => {
     if (currentStep === 0 && penTestResults.length === 0) {
       alert('Please run the penetration test first');
       return;
@@ -162,6 +250,55 @@ export function ScanningFlow({
       alert('Please run the phishing detection first');
       return;
     }
+
+    // 💾 Save phishing analysis to database when moving from step 1 to step 2
+    if (currentStep === 1 && phishingResults && phishingAuditId && user) {
+      try {
+        console.log("🔄 Attempting to save phishing analysis:", {
+          auditId: phishingAuditId,
+          contentLength: phishingAnalyzedContent.length,
+          contentPreview: phishingAnalyzedContent.substring(0, 100),
+          userId: user.id,
+          skipDbSave: false
+        });
+
+        // Use stored analyzed content for save (works for both text and file)
+        const response = await fetch(
+          "http://localhost:4000/api/phishing/analyze-text",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auditId: phishingAuditId,
+              content: phishingAnalyzedContent,
+              userId: user.id,
+              skipDbSave: false  // Save to DB this time
+            })
+          }
+        );
+
+        if (!response.ok) {
+          let errorData: any = null;
+          try {
+            errorData = await response.json();
+          } catch (_) {}
+
+          console.error("❌ Backend error during save:", {
+            status: response.status,
+            errorData
+          });
+
+          throw new Error(errorData?.message || `Save failed with status ${response.status}`);
+        }
+
+        console.log("✅ Phishing analysis saved to database");
+      } catch (error: any) {
+        console.error("❌ Failed to save phishing analysis:", error);
+        alert(`Failed to save phishing analysis: ${error.message || 'Unknown error'}. Please try again.`);
+        return; // Don't proceed to next step if save fails
+      }
+    }
+
     if (currentStep === 2 && idsResults.length === 0) {
       alert('Please run the IDS analysis first');
       return;
@@ -174,12 +311,6 @@ export function ScanningFlow({
   const prevStep = () => {
     setCurrentStep(prev => Math.max(prev - 1, 0));
   };
-
-  useEffect(() => {
-    if (currentStep === 4 && riskScore && !recoveryPlan.length && !recoveryGenerating) {
-      handleGenerateRecoveryPlan();
-    }
-  }, [currentStep, riskScore, recoveryPlan.length, recoveryGenerating]);
   return <div className="min-h-screen w-full py-24 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto">
         {/* Header */}
@@ -248,14 +379,53 @@ export function ScanningFlow({
 
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Email Content or Link
+                  Email Content or Link {phishingLocked && <span className="text-red-400">(Locked)</span>}
                 </label>
-                <textarea value={phishingContent} onChange={e => setPhishingContent(e.target.value)} placeholder="Paste suspicious email content or link here..." rows={6} className="w-full px-4 py-3 bg-gray-800/50 border border-gray-600 rounded-lg focus:outline-none focus:border-cyan-500 transition-colors text-white font-mono text-sm" />
+                <textarea
+                  value={phishingContent}
+                  onChange={e => {
+                    if (phishingLocked) {
+                      alert("Analysis is locked. You cannot modify the input.");
+                      return;
+                    }
+                    if (phishingFile) {
+                      alert("Please remove the uploaded file first to use text input.");
+                      return;
+                    }
+                    setPhishingContent(e.target.value);
+                  }}
+                  placeholder="Paste suspicious email content or link here..."
+                  rows={6}
+                  disabled={phishingLocked || !!phishingFile}
+                  className={`w-full px-4 py-3 bg-gray-800/50 border border-gray-600 rounded-lg focus:outline-none focus:border-cyan-500 transition-colors text-white font-mono text-sm ${(phishingLocked || phishingFile) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                />
               </div>
 
               <div className="text-center text-gray-400">OR</div>
 
-              <FileUpload label="Upload Email, Image, or PDF File" accept=".txt,.eml,.msg,.jpg,.jpeg,.png,.gif,.pdf" onFileSelect={setPhishingFile} selectedFile={phishingFile} onClear={() => setPhishingFile(null)} />
+              <FileUpload
+                label={`Upload Email, Image, or PDF File ${phishingLocked ? '(Locked)' : ''}`}
+                accept=".txt,.eml,.msg,.jpg,.jpeg,.png,.gif,.pdf"
+                onFileSelect={(file) => {
+                  if (phishingLocked) {
+                    alert("Analysis is locked. You cannot modify the input.");
+                    return;
+                  }
+                  if (phishingContent.trim()) {
+                    alert("Please clear the text input first to upload a file.");
+                    return;
+                  }
+                  setPhishingFile(file);
+                }}
+                selectedFile={phishingFile}
+                onClear={() => {
+                  if (phishingLocked) {
+                    alert("Analysis is locked. You cannot remove the file.");
+                    return;
+                  }
+                  setPhishingFile(null);
+                }}
+              />
 
               <button onClick={handlePhishingTest} disabled={phishingScanning || !phishingContent && !phishingFile} className="w-full py-3 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-lg font-semibold hover:shadow-lg hover:shadow-cyan-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
                 {phishingScanning ? <span className="flex items-center justify-center">
@@ -283,7 +453,7 @@ export function ScanningFlow({
 
                       {phishingResults.matches.length > 0 && <div className="mb-4">
                           <p className="text-sm font-semibold text-gray-400 mb-2">
-                            Phishing Keywords ({phishingResults.matches.length}
+                            Content Keywords ({phishingResults.matches.length}
                             ):
                           </p>
                           <div className="flex flex-wrap gap-2">
@@ -293,9 +463,20 @@ export function ScanningFlow({
                           </div>
                         </div>}
 
+                      {phishingResults.urls.length > 0 && <div className="mb-4">
+                          <p className="text-sm font-semibold text-gray-400 mb-2">
+                            Detected URLs ({phishingResults.urls.length}):
+                          </p>
+                          <div className="flex flex-col gap-2">
+                            {phishingResults.urls.map((url, idx) => <div key={idx} className="px-3 py-2 bg-blue-500/10 border border-blue-500/30 text-blue-300 rounded-lg text-sm font-mono break-all">
+                                {url}
+                              </div>)}
+                          </div>
+                        </div>}
+
                       {phishingResults.urlMatches.length > 0 && <div className="mb-4">
                           <p className="text-sm font-semibold text-gray-400 mb-2">
-                            Suspicious URL Patterns (
+                            Keywords Found in URLs (
                             {phishingResults.urlMatches.length}):
                           </p>
                           <div className="flex flex-wrap gap-2">
@@ -381,89 +562,6 @@ export function ScanningFlow({
                   Generate your comprehensive security report with ethical
                   disclosure policy and recovery steps.
                 </p>
-              </div>
-
-              {/* AI-style Recovery Plan Generation */}
-              <div className="glass p-6 rounded-xl mb-4">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="text-lg font-semibold">AI-Assisted Recovery Plan</h3>
-                    <p className="text-gray-400 text-sm">
-                      Suggested remediation actions generated from detected vulnerabilities and risk scores.
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleGenerateRecoveryPlan}
-                    disabled={recoveryGenerating || !riskScore || allVulnerabilities.length === 0}
-                    className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-lg text-sm font-semibold hover:shadow-lg hover:shadow-cyan-500/40 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-                  >
-                    {recoveryGenerating ? (
-                      <>
-                        <svg className="animate-spin h-4 w-4 mr-1" viewBox="0 0 24 24">
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                            fill="none"
-                          />
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                          />
-                        </svg>
-                        <span>Generating...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>Generate Recovery Plan</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {recoveryPlan.length === 0 && !recoveryGenerating && (
-                  <p className="text-gray-400 text-sm">
-                    No recovery plan has been generated yet. Click the button above to generate suggested actions.
-                  </p>
-                )}
-
-                {recoveryPlan.length > 0 && (
-                  <div className="grid md:grid-cols-3 gap-4 mt-4 text-left">
-                    {(['immediate', 'short_term', 'long_term'] as const).map(phase => {
-                      const items = recoveryPlan.filter(item => item.phase === phase);
-                      if (!items.length) return null;
-                      const titleMap: Record<typeof phase, string> = {
-                        immediate: 'Immediate (0-24 hours)',
-                        short_term: 'Short-term (1-7 days)',
-                        long_term: 'Long-term (1-3 months)',
-                      } as const;
-                      return (
-                        <div key={phase} className="bg-gray-900/40 border border-gray-700 rounded-lg p-4">
-                          <h4 className="text-sm font-semibold mb-3 text-cyan-300">
-                            {titleMap[phase]}
-                          </h4>
-                          <ul className="space-y-3 text-sm text-gray-300">
-                            {items.map(item => (
-                              <li key={item.id} className="border-l-2 border-cyan-500/60 pl-3">
-                                <p className="font-semibold mb-1">{item.title}</p>
-                                <p className="text-gray-400 text-xs mb-1">{item.description}</p>
-                                {item.stakeholders.length > 0 && (
-                                  <p className="text-[11px] text-gray-500">
-                                    Stakeholders: {item.stakeholders.join(', ')}
-                                  </p>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
 
               <div className="glass p-8 rounded-xl text-center">
