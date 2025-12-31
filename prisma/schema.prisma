@@ -46,11 +46,13 @@ model PenetrationTestResult {
 }
 
 model PhishingAnalysis {
-  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  auditId          String       @db.Uuid
-  audit            AuditSession @relation(fields: [auditId], references: [id], onDelete: Cascade)
-  detectedKeywords String[]
-  isPhishing       Boolean      @default(false)
+  id                 String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  auditId            String       @db.Uuid
+  audit              AuditSession @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  detectedKeywords   String[]
+  isPhishing         Boolean      @default(false)
+  riskScore          Float?
+  suspiciousPatterns String[]     @default([])
 }
 
 model IDSLab {

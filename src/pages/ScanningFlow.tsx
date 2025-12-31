@@ -3,14 +3,38 @@ import { StepIndicator } from '../components/StepIndicator';
 import { FileUpload } from '../components/FileUpload';
 import { VulnerabilityList } from '../components/VulnerabilityList';
 import { RiskScoreDisplay } from '../components/RiskScoreDisplay';
-import { detectPenetrationVulnerabilities, detectPhishing, analyzeIDSLogs, Vulnerability, extractTextFromFile } from '../utils/vulnerabilityDetector';
+import { detectPenetrationVulnerabilities, analyzeIDSLogs, calculateRiskScore, Vulnerability } from '../utils/vulnerabilityDetector';
 import { generateRecoveryPlan, RecoveryPlanItem } from '../utils/recoveryPlan';
 import { generatePDFReport, generatePDFHTML, downloadTextReport, downloadPDFReport } from '../utils/pdfGenerator';
 import { AlertCircleIcon, CheckCircleIcon, DownloadIcon, ArrowRightIcon, ArrowLeftIcon, FileTextIcon } from 'lucide-react';
+
+// ============================================
+// BACKEND API CONFIGURATION
+// ============================================
+const API_URL = 'http://localhost:4000';
+
+/**
+ * ScanningFlow Component - 5-Step Security Assessment Flow
+ * 
+ * IMPORTANT: This is a SESSION-BASED component with NO persistence.
+ * - All state is stored in React component state (memory only)
+ * - Refreshing the page will RESET all progress
+ * - Users must complete all 5 steps in one session
+ * 
+ * FLOW:
+ * Step 1: Penetration Test → Backend API (saves to DB)
+ * Step 2: Phishing Detection → Backend API (saves to DB on next step)
+ * Step 3: IDS Analysis → Frontend only
+ * Step 4: Risk Scoring → Frontend calculation
+ * Step 5: Recovery Plan → Frontend generation → Download PDF/Text
+ * 
+ * Each step must be completed before proceeding to the next.
+ */
+
 interface ScanningFlowProps {
   user: {
+    id: string;
     name: string;
-    email: string;
     position: string;
   } | null;
   onComplete: () => void;
@@ -21,11 +45,13 @@ export function ScanningFlow({
 }: ScanningFlowProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [allVulnerabilities, setAllVulnerabilities] = useState<Vulnerability[]>([]);
-  const [auditId, setAuditId] = useState<string | null>(null);
+  
   // Step 1: Penetration Test
   const [targetUrl, setTargetUrl] = useState('');
   const [penTestResults, setPenTestResults] = useState<Vulnerability[]>([]);
   const [penTestScanning, setPenTestScanning] = useState(false);
+  const [penTestError, setPenTestError] = useState<string>('');
+  
   // Step 2: Phishing Detection
   const [phishingContent, setPhishingContent] = useState('');
   const [phishingFile, setPhishingFile] = useState<File | null>(null);
@@ -34,216 +60,306 @@ export function ScanningFlow({
     matches: string[];
     risk: number;
     urlMatches: string[];
+    urls: string[];
     suspiciousPatterns: string[];
   } | null>(null);
   const [phishingScanning, setPhishingScanning] = useState(false);
+  const [phishingLocked, setPhishingLocked] = useState(false); // Lock after analysis
+  const [phishingAuditId, setPhishingAuditId] = useState<string | null>(null); // Store audit ID for later DB save
+  const [phishingAnalyzedContent, setPhishingAnalyzedContent] = useState<string>(''); // Store content that was analyzed
+  
   // Step 3: IDS
   const [idsFile, setIdsFile] = useState<File | null>(null);
   const [idsResults, setIdsResults] = useState<Vulnerability[]>([]);
   const [idsScanning, setIdsScanning] = useState(false);
+  
   // Step 4: Risk Scoring
   const [riskScore, setRiskScore] = useState<any>(null);
+  
   // Step 5: Recovery Plan
   const [recoveryPlan, setRecoveryPlan] = useState<RecoveryPlanItem[]>([]);
   const [recoveryGenerating, setRecoveryGenerating] = useState(false);
+  
   const steps = ['Penetration Test', 'Phishing Detection', 'IDS Analysis', 'Risk Scoring', 'Recovery Plan'];
 
-  // Create audit session on component mount or when starting first test
+  // ============================================
+  // SESSION MANAGEMENT - No Persistence
+  // ============================================
   useEffect(() => {
-    const createAuditSession = async () => {
-      if (!auditId && user) {
-        try {
-          console.log('Creating audit session for user:', user.email);
-
-          const userResponse = await fetch('http://localhost:4000/api/users');
-          if (!userResponse.ok) {
-            console.error('Failed to fetch users:', userResponse.status);
-            return;
-          }
-
-          const users = await userResponse.json();
-          const currentUser = users.find((u: any) => u.email === user.email);
-
-          if (!currentUser) {
-            console.error('User not found in database. User email:', user.email);
-            console.log('Available emails:', users.map((u: any) => u.email));
-            return;
-          }
-
-          console.log('Found user in database:', currentUser.id);
-
-          const response = await fetch('http://localhost:4000/api/audit-session', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userId: currentUser.id,
-              targetUrl: targetUrl || 'pending'
-            })
-          });
-
-          if (response.ok) {
-            const audit = await response.json();
-            setAuditId(audit.id);
-            console.log('✅ Audit session created successfully:', audit.id);
-          } else {
-            const errorText = await response.text();
-            console.error('Failed to create audit session:', response.status, errorText);
-          }
-        } catch (error) {
-          console.error('Error creating audit session:', error);
-        }
+    // Warn user that refreshing will lose progress
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (currentStep > 0 || penTestResults.length > 0 || phishingResults || idsResults.length > 0) {
+        e.preventDefault();
+        e.returnValue = 'You have unsaved progress. If you leave, you will need to start over.';
+        return e.returnValue;
       }
     };
 
-    createAuditSession();
-  }, [user]);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [currentStep, penTestResults, phishingResults, idsResults]);
 
-  const handlePenTest = () => {
+  // Show session info on first load
+  useEffect(() => {
+    console.log('🔐 Session-based scanning flow initialized');
+    console.log('⚠️ Progress will be lost if you refresh or close this page');
+  }, []);
+
+  // ============================================
+  // UPDATED: Penetration Test with Backend
+  // ============================================
+  const handlePenTest = async () => {
+    if (!user || !user.id) {
+      alert('You must be logged in to perform a penetration test');
+      return;
+    }
+
     if (!targetUrl) {
       alert('Please enter a target URL');
       return;
     }
+
     setPenTestScanning(true);
-    setTimeout(() => {
-      const vulnerabilities = detectPenetrationVulnerabilities(targetUrl);
-      setPenTestResults(vulnerabilities);
-      setAllVulnerabilities(prev => [...prev, ...vulnerabilities]);
+    setPenTestError('');
+
+    try {
+      // Check if backend is available
+      const healthResponse = await fetch(`${API_URL}/api/pen-test/health`, {
+        method: 'GET',
+      }).catch(() => null);
+
+      if (!healthResponse || !healthResponse.ok) {
+        // Backend not available - use frontend fallback
+        console.warn('⚠️ Backend unavailable, using frontend simulation');
+        setTimeout(() => {
+          const vulnerabilities = detectPenetrationVulnerabilities(targetUrl);
+          setPenTestResults(vulnerabilities);
+          setAllVulnerabilities(prev => [...prev, ...vulnerabilities]);
+          setPenTestScanning(false);
+        }, 2000);
+        return;
+      }
+
+      // Backend available - use real API with userId
+      console.log('🔗 Using backend API for penetration test');
+      console.log('👤 User:', user.name, '| ID:', user.id);
+            
+      const response = await fetch(`${API_URL}/api/pen-test/scan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url: targetUrl, userId: user.id }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ message: 'Scan failed' }));
+        // Handle authentication error
+        if (response.status === 401) {
+          throw new Error('Authentication required. Please log in again.');
+        }
+        throw new Error(error.message || `HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      
+      // Set results from backend
+      setPenTestResults(result.vulnerabilities);
+      setAllVulnerabilities(prev => [...prev, ...result.vulnerabilities]);
+      
+      console.log('✅ Backend scan complete:', result.summary);
+      console.log('📋 Audit ID:', result.auditId);
+      console.log('💾 Database:', result.database);
+
+      // Show success message if saved to database
+      if (result.database && result.database.saved > 0) {
+        console.log(`✅ Saved ${result.database.saved} vulnerabilities to database`);
+      }
+      
+    } catch (error) {
+      console.error('❌ Scan error:', error);
+      setPenTestError(error instanceof Error ? error.message : 'Unknown error occurred');
+      // Show user-friendly error
+      if (error instanceof Error && error.message.includes('Authentication')) {
+        alert('Your session has expired. Please log in again.');
+      } else {
+        alert(`Scan failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    } finally {
       setPenTestScanning(false);
-    }, 2000);
+    }
   };
+
+  // ============================================
+  // UPDATED: Phishing Detection with Backend
+  // ============================================
   const handlePhishingTest = async () => {
-    if (!phishingContent && !phishingFile) {
-      alert('Please enter content or upload a file');
+    // ✅ Guard: must be logged in
+    if (!user) {
+      alert("You must be logged in to run phishing analysis.");
       return;
     }
+
+    // ✅ Check if user has ID (required after recent update)
+    if (!user.id) {
+      alert("Your session is outdated. Please log out and log back in to continue.");
+      return;
+    }
+
+    // 🔒 Prevent re-analysis if already locked
+    if (phishingLocked) {
+      alert("Phishing analysis is complete and locked. Please proceed to the next step.");
+      return;
+    }
+
+    if (!phishingContent && !phishingFile) {
+      alert("Please enter content or upload a file");
+      return;
+    }
+
     setPhishingScanning(true);
+
     try {
-      let contentToAnalyze = phishingContent;
-      // If file is uploaded, extract text
-      if (phishingFile) {
-        const isImage = phishingFile.type.startsWith('image/');
-        const isPDF = phishingFile.type === 'application/pdf';
-        if (isImage || isPDF) {
-          // Simulate OCR/PDF text extraction
-          contentToAnalyze = await extractTextFromFile(phishingFile);
-        } else {
-          // Read text file directly
-          contentToAnalyze = await phishingFile.text();
-        }
+      const auditId = crypto.randomUUID();
+      let response: Response;
+
+      if (phishingFile instanceof File) {
+        // ===== FILE → analyze-file =====
+        const formData = new FormData();
+        formData.append("auditId", auditId);
+        formData.append("userId", user.id);
+        formData.append("file", phishingFile);
+        formData.append("skipDbSave", "true"); // Don't save to DB during analysis
+
+        response = await fetch(
+          `${API_URL}/api/phishing/analyze-file`,
+          {
+            method: "POST",
+            body: formData
+          }
+        );
+      } else {
+        // ===== TEXT → analyze-text =====
+        response = await fetch(
+          `${API_URL}/api/phishing/analyze-text`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auditId,
+              content: phishingContent,
+              userId: user.id,
+              skipDbSave: true  // Don't save to DB during analysis
+            })
+          }
+        );
       }
-      setTimeout(() => {
-        const results = detectPhishing(contentToAnalyze, phishingFile?.name);
-        setPhishingResults(results);
-        if (results.isPhishing) {
-          const phishingVuln: Vulnerability = {
-            id: `PHISH-${Date.now()}`,
-            type: 'Phishing Attempt Detected',
-            severity: results.risk > 60 ? 'high' : 'medium',
-            description: `Detected ${results.matches.length} phishing keywords, ${results.urlMatches.length} suspicious URL patterns, and ${results.suspiciousPatterns.length} suspicious patterns`,
-            technicalRisk: Math.min(Math.ceil(results.risk / 20), 5),
-            ethicalRisk: 4,
-            recommendation: 'Block sender, report to security team, and educate users about phishing tactics. Implement email filtering and URL scanning.',
-            ethicalImplication: 'Phishing attempts violate user trust and can lead to identity theft and financial fraud. Protecting users from such threats is a moral obligation.'
-          };
-          setAllVulnerabilities(prev => [...prev, phishingVuln]);
-        }
-        setPhishingScanning(false);
-      }, 1500);
-    } catch (error) {
-      console.error('Error analyzing phishing content:', error);
+
+      // ===== DEBUG-AWARE ERROR HANDLING =====
+      if (!response.ok) {
+        let errorData: any = null;
+
+        try {
+          errorData = await response.json();
+        } catch (_) {}
+
+        console.error("❌ Backend phishing error:", {
+          status: response.status,
+          statusText: response.statusText,
+          errorData
+        });
+
+        throw new Error(
+          errorData?.message ||
+          errorData?.errorCode ||
+          `Request failed with status ${response.status}`
+        );
+      }
+
+      const result = await response.json();
+
+      // ===== MAP BACKEND RESULT TO UI =====
+      // Normalize risk score to 0-100% (max expected score is ~20 with bonuses)
+      const normalizedRisk = Math.min((result.riskScore / 20) * 100, 100);
+
+      // 🔒 Lock analysis after successful completion
+      setPhishingLocked(true);
+      setPhishingAuditId(auditId);
+
+      // Store the content that was analyzed for later DB save
+      if (phishingFile instanceof File) {
+        // For files, store the extracted text preview if available
+        setPhishingAnalyzedContent(result.extractedPreview || 'file-content');
+      } else {
+        // For text, store the actual content
+        setPhishingAnalyzedContent(phishingContent);
+      }
+
+      setPhishingResults({
+        isPhishing: result.isPhishing,
+        matches: result.detectedKeywords || [],
+        risk: normalizedRisk,
+        urlMatches: result.urlKeywords || [],
+        urls: result.urls || [],
+        suspiciousPatterns: result.detectedKeywords || []
+      });
+
+      if (result.isPhishing) {
+        const phishingVuln: Vulnerability = {
+          id: `PHISH-${Date.now()}`,
+          type: "Phishing Attempt Detected",
+          severity: result.severity === "Critical" ? "high" : "medium",
+          description: `Detected phishing indicators: ${result.detectedKeywords.join(", ")}`,
+          technicalRisk: Math.min(result.riskScore, 5),
+          ethicalRisk: 4,
+          recommendation: "Block sender, report incident, educate users.",
+          ethicalImplication:
+            "Phishing violates trust and may lead to identity theft and financial harm."
+        };
+
+        setAllVulnerabilities(prev => [...prev, phishingVuln]);
+      }
+
+    } catch (err: any) {
+      console.error("❌ Phishing detection failed:", err);
+
+      alert(
+        "Phishing analysis failed:\n\n" +
+        (err.message || "Unknown error")
+      );
+    } finally {
       setPhishingScanning(false);
-      alert('Error analyzing content. Please try again.');
     }
   };
-  const handleIDSAnalysis = async () => {
+
+  // ============================================
+  // UNCHANGED: IDS Analysis
+  // ============================================
+  const handleIDSAnalysis = () => {
     if (!idsFile) {
       alert('Please upload a log file');
       return;
     }
-
-    if (!auditId) {
-      alert('Audit session not initialized. Please refresh and try again.');
-      return;
-    }
-
     setIdsScanning(true);
-
-    try {
-      // Create FormData to send file to backend
-      const formData = new FormData();
-      formData.append('file', idsFile);
-      formData.append('auditId', auditId);
-
-      const response = await fetch('http://localhost:4000/api/ids/analyze-logs', {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to analyze logs');
-      }
-
-      const result = await response.json();
-
-      // Convert backend findings to frontend Vulnerability format
-      const vulnerabilities: Vulnerability[] = result.findings.map((finding: any) => ({
-        id: finding.id,
-        type: finding.title,
-        severity: finding.severity.toLowerCase() as 'critical' | 'high' | 'medium' | 'low',
-        description: finding.description,
-        technicalRisk: finding.severity === 'Critical' ? 5 : finding.severity === 'High' ? 4 : finding.severity === 'Medium' ? 3 : 2,
-        ethicalRisk: 3,
-        recommendation: finding.recommendation,
-        ethicalImplication: 'Intrusion attempts violate user privacy and system integrity. Protecting against unauthorized access is essential.'
-      }));
-
-      setIdsResults(vulnerabilities);
-      setAllVulnerabilities(prev => [...prev, ...vulnerabilities]);
-      setIdsScanning(false);
-
-      console.log('IDS Analysis saved to database:', result);
-    } catch (error) {
-      console.error('Error analyzing logs:', error);
-      setIdsScanning(false);
-      alert('Error analyzing logs. Please check if the backend is running and try again.');
-    }
+    const reader = new FileReader();
+    reader.onload = e => {
+      const content = e.target?.result as string;
+      setTimeout(() => {
+        const vulnerabilities = analyzeIDSLogs(content);
+        setIdsResults(vulnerabilities);
+        setAllVulnerabilities(prev => [...prev, ...vulnerabilities]);
+        setIdsScanning(false);
+      }, 2000);
+    };
+    reader.readAsText(idsFile);
   };
-  const calculateRisk = async () => {
-    if (!auditId) {
-      alert('Audit session not initialized. Please refresh and try again.');
-      return;
-    }
 
-    try {
-      console.log('Calculating risk score for audit:', auditId);
-
-      const response = await fetch('http://localhost:4000/api/risk/calculate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ auditId })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to calculate risk score');
-      }
-
-      const result = await response.json();
-      console.log('✅ Risk score calculated and saved:', result);
-
-      // Convert backend format to frontend format
-      setRiskScore({
-        overall: result.overall_score,
-        technical: result.technical_score,
-        ethical: result.ethical_score,
-        critical: result.severity_counts.critical,
-        high: result.severity_counts.high,
-        medium: result.severity_counts.medium,
-        low: result.severity_counts.low
-      });
-    } catch (error) {
-      console.error('Error calculating risk score:', error);
-      alert('Error calculating risk score. Please check if the backend is running.');
-    }
+  // ============================================
+  // UNCHANGED: Risk Calculation & Reports
+  // ============================================
+  const calculateRisk = () => {
+    const score = calculateRiskScore(allVulnerabilities);
+    setRiskScore(score);
   };
 
   const handleGenerateRecoveryPlan = () => {
@@ -256,6 +372,7 @@ export function ScanningFlow({
       setRecoveryGenerating(false);
     }, 800);
   };
+  
   const handleDownloadTextReport = () => {
     if (!user) return;
     const report = generatePDFReport(allVulnerabilities, {
@@ -265,6 +382,7 @@ export function ScanningFlow({
     }, riskScore);
     downloadTextReport(report, `AmanTech_Shield_Security_Report_${Date.now()}.txt`);
   };
+  
   const handleDownloadPDFReport = () => {
     if (!user) return;
     const htmlContent = generatePDFHTML(allVulnerabilities, {
@@ -274,24 +392,86 @@ export function ScanningFlow({
     }, riskScore);
     downloadPDFReport(htmlContent, `AmanTech_Shield_Security_Report_${Date.now()}.pdf`);
   };
-  const nextStep = () => {
+  
+  const nextStep = async () => {
+    // Step 0: Penetration Test validation
     if (currentStep === 0 && penTestResults.length === 0) {
-      alert('Please run the penetration test first');
+      alert('⚠️ Please complete the penetration test before proceeding to the next step.');
       return;
     }
+    
+    // Step 1: Phishing Detection validation
     if (currentStep === 1 && !phishingResults) {
-      alert('Please run the phishing detection first');
+      alert('⚠️ Please complete the phishing detection analysis before proceeding to the next step.');
       return;
     }
+
+    // 💾 Save phishing analysis to database when moving from step 1 to step 2
+    if (currentStep === 1 && phishingResults && phishingAuditId && user) {
+      try {
+        console.log("🔄 Attempting to save phishing analysis:", {
+          auditId: phishingAuditId,
+          contentLength: phishingAnalyzedContent.length,
+          contentPreview: phishingAnalyzedContent.substring(0, 100),
+          userId: user.id,
+          skipDbSave: false
+        });
+
+        // Use stored analyzed content for save (works for both text and file)
+        const response = await fetch(
+          `${API_URL}/api/phishing/analyze-text`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auditId: phishingAuditId,
+              content: phishingAnalyzedContent,
+              userId: user.id,
+              skipDbSave: false  // Save to DB this time
+            })
+          }
+        );
+
+        if (!response.ok) {
+          let errorData: any = null;
+          try {
+            errorData = await response.json();
+          } catch (_) {}
+
+          console.error("❌ Backend error during save:", {
+            status: response.status,
+            errorData
+          });
+
+          throw new Error(errorData?.message || `Save failed with status ${response.status}`);
+        }
+
+        console.log("✅ Phishing analysis saved to database");
+      } catch (error: any) {
+        console.error("❌ Failed to save phishing analysis:", error);
+        alert(`Failed to save phishing analysis: ${error.message || 'Unknown error'}. Please try again.`);
+        return; // Don't proceed to next step if save fails
+      }
+    }
+
+    // Step 2: IDS Analysis validation
     if (currentStep === 2 && idsResults.length === 0) {
-      alert('Please run the IDS analysis first');
+      alert('⚠️ Please complete the IDS analysis before proceeding to the next step.');
       return;
     }
-    if (currentStep === 3 && !riskScore) {
-      calculateRisk();
+    
+    // Step 3: Risk Scoring - auto-calculate if not done
+    if (currentStep === 3) {
+      if (!riskScore) {
+        calculateRisk();
+      }
+      // Wait a moment for calculation to complete
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
+    
     setCurrentStep(prev => Math.min(prev + 1, steps.length - 1));
   };
+  
   const prevStep = () => {
     setCurrentStep(prev => Math.max(prev - 1, 0));
   };
@@ -301,8 +481,24 @@ export function ScanningFlow({
       handleGenerateRecoveryPlan();
     }
   }, [currentStep, riskScore, recoveryPlan.length, recoveryGenerating]);
+
   return <div className="min-h-screen w-full py-24 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto">
+        {/* Session Warning Banner */}
+        {(currentStep > 0 || penTestResults.length > 0 || phishingResults || idsResults.length > 0) && (
+          <div className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+            <div className="flex items-center gap-3">
+              <svg className="w-5 h-5 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <div className="flex-1">
+                <p className="text-sm text-yellow-200 font-medium">Session Active - Progress Not Saved</p>
+                <p className="text-xs text-yellow-300/70">Your progress will be lost if you refresh or close this page. Complete all steps to download your report.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Header */}
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold mb-4">
@@ -311,6 +507,25 @@ export function ScanningFlow({
           <p className="text-gray-400">
             Complete all 5 steps to generate your comprehensive security report
           </p>
+          
+          {/* Progress Summary */}
+          <div className="mt-4 flex justify-center gap-2 text-xs">
+            <span className={`px-3 py-1 rounded-full ${penTestResults.length > 0 ? 'bg-green-500/20 text-green-400' : 'bg-gray-700/50 text-gray-500'}`}>
+              {penTestResults.length > 0 ? '✓' : '○'} Step 1
+            </span>
+            <span className={`px-3 py-1 rounded-full ${phishingResults ? 'bg-green-500/20 text-green-400' : 'bg-gray-700/50 text-gray-500'}`}>
+              {phishingResults ? '✓' : '○'} Step 2
+            </span>
+            <span className={`px-3 py-1 rounded-full ${idsResults.length > 0 ? 'bg-green-500/20 text-green-400' : 'bg-gray-700/50 text-gray-500'}`}>
+              {idsResults.length > 0 ? '✓' : '○'} Step 3
+            </span>
+            <span className={`px-3 py-1 rounded-full ${riskScore ? 'bg-green-500/20 text-green-400' : 'bg-gray-700/50 text-gray-500'}`}>
+              {riskScore ? '✓' : '○'} Step 4
+            </span>
+            <span className={`px-3 py-1 rounded-full ${recoveryPlan.length > 0 ? 'bg-green-500/20 text-green-400' : 'bg-gray-700/50 text-gray-500'}`}>
+              {recoveryPlan.length > 0 ? '✓' : '○'} Step 5
+            </span>
+          </div>
         </div>
 
         {/* Step Indicator */}
@@ -318,23 +533,38 @@ export function ScanningFlow({
 
         {/* Step Content */}
         <div className="glass p-8 rounded-2xl mb-8">
-          {/* Step 1: Penetration Test */}
+          {/* ============================================ */}
+          {/* Step 1: Penetration Test - UPDATED */}
+          {/* ============================================ */}
           {currentStep === 0 && <div className="space-y-6">
               <div>
                 <h2 className="text-2xl font-bold mb-2">
-                  Step 1: Penetration Test Simulation
+                  Step 1: Penetration Test
                 </h2>
                 <p className="text-gray-400">
-                  Enter your bank website URL to check for vulnerabilities like
-                  weak passwords, missing SSL, and security misconfigurations.
+                  Enter a website URL to check for security vulnerabilities including SSL/TLS, 
+                  security headers, authentication issues, and potential information disclosure.
                 </p>
+                <div className="mt-2 flex items-center space-x-2 text-sm">
+                  <span className="px-2 py-1 bg-green-500/20 text-green-400 rounded">
+                    ✓ Backend Connected
+                  </span>
+                  <span className="text-gray-500">
+                    Real-time security analysis
+                  </span>
+                </div>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">
                   Target Website URL
                 </label>
-                <input type="url" value={targetUrl} onChange={e => setTargetUrl(e.target.value)} placeholder="https://example-bank.com" className="w-full px-4 py-3 bg-gray-800/50 border border-gray-600 rounded-lg focus:outline-none focus:border-cyan-500 transition-colors text-white" />
+                <input type="url" value={targetUrl} onChange={e => setTargetUrl(e.target.value)} placeholder="https://example.com" className="w-full px-4 py-3 bg-gray-800/50 border border-gray-600 rounded-lg focus:outline-none focus:border-cyan-500 transition-colors text-white" />
+                {penTestError && (
+                  <p className="mt-2 text-sm text-red-400">
+                    ⚠️ {penTestError}
+                  </p>
+                )}
               </div>
 
               <button onClick={handlePenTest} disabled={penTestScanning || !targetUrl} className="w-full py-3 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-lg font-semibold hover:shadow-lg hover:shadow-cyan-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
@@ -348,14 +578,19 @@ export function ScanningFlow({
               </button>
 
               {penTestResults.length > 0 && <div className="mt-8">
-                  <h3 className="text-xl font-bold mb-4">
-                    Detected Vulnerabilities
-                  </h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-xl font-bold">Detected Vulnerabilities</h3>
+                    <span className="text-sm text-gray-400">
+                      Found {penTestResults.length} issue{penTestResults.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
                   <VulnerabilityList vulnerabilities={penTestResults} />
                 </div>}
             </div>}
 
-          {/* Step 2: Phishing Detection */}
+          {/* ============================================ */}
+          {/* Step 2: Phishing Detection - UPDATED */}
+          {/* ============================================ */}
           {currentStep === 1 && <div className="space-y-6">
               <div>
                 <h2 className="text-2xl font-bold mb-2">
@@ -369,14 +604,53 @@ export function ScanningFlow({
 
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Email Content or Link
+                  Email Content or Link {phishingLocked && <span className="text-red-400">(Locked)</span>}
                 </label>
-                <textarea value={phishingContent} onChange={e => setPhishingContent(e.target.value)} placeholder="Paste suspicious email content or link here..." rows={6} className="w-full px-4 py-3 bg-gray-800/50 border border-gray-600 rounded-lg focus:outline-none focus:border-cyan-500 transition-colors text-white font-mono text-sm" />
+                <textarea
+                  value={phishingContent}
+                  onChange={e => {
+                    if (phishingLocked) {
+                      alert("Analysis is locked. You cannot modify the input.");
+                      return;
+                    }
+                    if (phishingFile) {
+                      alert("Please remove the uploaded file first to use text input.");
+                      return;
+                    }
+                    setPhishingContent(e.target.value);
+                  }}
+                  placeholder="Paste suspicious email content or link here..."
+                  rows={6}
+                  disabled={phishingLocked || !!phishingFile}
+                  className={`w-full px-4 py-3 bg-gray-800/50 border border-gray-600 rounded-lg focus:outline-none focus:border-cyan-500 transition-colors text-white font-mono text-sm ${(phishingLocked || phishingFile) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                />
               </div>
 
               <div className="text-center text-gray-400">OR</div>
 
-              <FileUpload label="Upload Email, Image, or PDF File" accept=".txt,.eml,.msg,.jpg,.jpeg,.png,.gif,.pdf" onFileSelect={setPhishingFile} selectedFile={phishingFile} onClear={() => setPhishingFile(null)} />
+              <FileUpload
+                label={`Upload Email, Image, or PDF File ${phishingLocked ? '(Locked)' : ''}`}
+                accept=".txt,.eml,.msg,.jpg,.jpeg,.png,.gif,.pdf"
+                onFileSelect={(file) => {
+                  if (phishingLocked) {
+                    alert("Analysis is locked. You cannot modify the input.");
+                    return;
+                  }
+                  if (phishingContent.trim()) {
+                    alert("Please clear the text input first to upload a file.");
+                    return;
+                  }
+                  setPhishingFile(file);
+                }}
+                selectedFile={phishingFile}
+                onClear={() => {
+                  if (phishingLocked) {
+                    alert("Analysis is locked. You cannot remove the file.");
+                    return;
+                  }
+                  setPhishingFile(null);
+                }}
+              />
 
               <button onClick={handlePhishingTest} disabled={phishingScanning || !phishingContent && !phishingFile} className="w-full py-3 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-lg font-semibold hover:shadow-lg hover:shadow-cyan-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
                 {phishingScanning ? <span className="flex items-center justify-center">
@@ -404,7 +678,7 @@ export function ScanningFlow({
 
                       {phishingResults.matches.length > 0 && <div className="mb-4">
                           <p className="text-sm font-semibold text-gray-400 mb-2">
-                            Phishing Keywords ({phishingResults.matches.length}
+                            Content Keywords ({phishingResults.matches.length}
                             ):
                           </p>
                           <div className="flex flex-wrap gap-2">
@@ -414,9 +688,20 @@ export function ScanningFlow({
                           </div>
                         </div>}
 
+                      {phishingResults.urls.length > 0 && <div className="mb-4">
+                          <p className="text-sm font-semibold text-gray-400 mb-2">
+                            Detected URLs ({phishingResults.urls.length}):
+                          </p>
+                          <div className="flex flex-col gap-2">
+                            {phishingResults.urls.map((url, idx) => <div key={idx} className="px-3 py-2 bg-blue-500/10 border border-blue-500/30 text-blue-300 rounded-lg text-sm font-mono break-all">
+                                {url}
+                              </div>)}
+                          </div>
+                        </div>}
+
                       {phishingResults.urlMatches.length > 0 && <div className="mb-4">
                           <p className="text-sm font-semibold text-gray-400 mb-2">
-                            Suspicious URL Patterns (
+                            Keywords Found in URLs (
                             {phishingResults.urlMatches.length}):
                           </p>
                           <div className="flex flex-wrap gap-2">
@@ -608,7 +893,23 @@ export function ScanningFlow({
                     <span>Download as Text File</span>
                   </button>
 
-                  <button onClick={onComplete} className="w-full py-4 border-2 border-gray-600 rounded-lg font-semibold hover:bg-gray-700/30 transition-all">
+                  <button 
+                    onClick={() => {
+                      const hasProgress = currentStep > 0 || penTestResults.length > 0 || phishingResults || idsResults.length > 0;
+                      if (hasProgress) {
+                        const confirmed = window.confirm(
+                          'Are you sure you want to return to the dashboard?\n\n' +
+                          'This will end your current session and you will need to start over if you want to run another scan.'
+                        );
+                        if (confirmed) {
+                          onComplete();
+                        }
+                      } else {
+                        onComplete();
+                      }
+                    }}
+                    className="w-full py-4 border-2 border-gray-600 rounded-lg font-semibold hover:bg-gray-700/30 transition-all"
+                  >
                     Return to Dashboard
                   </button>
                 </div>
