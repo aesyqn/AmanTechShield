@@ -14,6 +14,8 @@ import { idsRouter } from './modules/ids/ids.code.ts';
 import { riskRouter } from './modules/risk/risk.controller.ts';
 import { reportingRouter } from './modules/reporting/reporting.controller.ts';
 import { authRouter } from './modules/auth/auth.controller.ts';
+import { auditRouter } from './modules/audit/audit.controller.ts';
+import { ethicsRouter } from './modules/ethics/ethics.controller.ts';
 import { prisma } from './prisma.ts';
 
 dotenv.config();
@@ -24,10 +26,12 @@ const port = process.env.BACKEND_PORT || 4000;
 app.use(cors());
 app.use(express.json());
 
+app.use('/api/audit', auditRouter);
 app.use('/api/pen-test', penTestRouter);
 app.use('/api/phishing', phishingRouter);
 app.use('/api/ids', idsRouter);
 app.use('/api/risk', riskRouter);
+app.use('/api/ethics', ethicsRouter);
 app.use('/api/reporting', reportingRouter);
 app.use('/api/auth', authRouter);
 

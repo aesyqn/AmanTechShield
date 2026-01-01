@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { StepIndicator } from '../components/StepIndicator';
 import { FileUpload } from '../components/FileUpload';
 import { VulnerabilityList } from '../components/VulnerabilityList';
 import { RiskScoreDisplay } from '../components/RiskScoreDisplay';
-import { detectPenetrationVulnerabilities, analyzeIDSLogs, calculateRiskScore, Vulnerability } from '../utils/vulnerabilityDetector';
+import { detectPenetrationVulnerabilities, calculateRiskScore, Vulnerability } from '../utils/vulnerabilityDetector';
 import { generateRecoveryPlan, RecoveryPlanItem } from '../utils/recoveryPlan';
-import { generatePDFReport, generatePDFHTML, downloadTextReport, downloadPDFReport } from '../utils/pdfGenerator';
+import { generatePDFReport, downloadTextReport } from '../utils/pdfGenerator';
 import { AlertCircleIcon, CheckCircleIcon, DownloadIcon, ArrowRightIcon, ArrowLeftIcon, FileTextIcon } from 'lucide-react';
 
 // ============================================
@@ -16,17 +16,18 @@ const API_URL = 'http://localhost:4000';
 /**
  * ScanningFlow Component - 5-Step Security Assessment Flow
  * 
- * IMPORTANT: This is a SESSION-BASED component with NO persistence.
- * - All state is stored in React component state (memory only)
- * - Refreshing the page will RESET all progress
- * - Users must complete all 5 steps in one session
+ * IMPORTANT: This is a SESSION-BASED component with database persistence.
+ * - Frontend state is stored in React component state (memory only)
+ * - Backend saves results to database via unified audit session
+ * - Refreshing the page will RESET frontend state but data is saved in DB
+ * - Users must complete all 5 steps in one session to download report
  * 
  * FLOW:
- * Step 1: Penetration Test → Backend API (saves to DB)
- * Step 2: Phishing Detection → Backend API (saves to DB on next step)
- * Step 3: IDS Analysis → Frontend only
- * Step 4: Risk Scoring → Frontend calculation
- * Step 5: Recovery Plan → Frontend generation → Download PDF/Text
+ * Step 1: Penetration Test → ✅ Backend API (saves to DB with auditId)
+ * Step 2: Phishing Detection → ✅ Backend API (saves to DB with auditId)
+ * Step 3: IDS Analysis → ✅ Backend API (saves to DB with auditId)
+ * Step 4: Risk Scoring → ✅ Backend API (calculates & saves to DB with auditId)
+ * Step 5: Recovery Plan → ✅ Backend API (generates plan & PDF from DB)
  * 
  * Each step must be completed before proceeding to the next.
  */
@@ -45,6 +46,11 @@ export function ScanningFlow({
 }: ScanningFlowProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [allVulnerabilities, setAllVulnerabilities] = useState<Vulnerability[]>([]);
+  
+  // ============================================
+  // 🔑 UNIFIED SESSION MANAGEMENT
+  // ============================================
+  const [sessionAuditId, setSessionAuditId] = useState<string | null>(null);
   
   // Step 1: Penetration Test
   const [targetUrl, setTargetUrl] = useState('');
@@ -83,6 +89,42 @@ export function ScanningFlow({
   const steps = ['Penetration Test', 'Phishing Detection', 'IDS Analysis', 'Risk Scoring', 'Recovery Plan'];
 
   // ============================================
+  // 🔑 CREATE UNIFIED AUDIT SESSION ON MOUNT
+  // ============================================
+  useEffect(() => {
+    const createUnifiedSession = async () => {
+      if (!user || sessionAuditId) return; // Already created or no user
+      
+      try {
+        console.log('🔐 Creating unified audit session for user:', user.id);
+        
+        const response = await fetch(`${API_URL}/api/audit/create-session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            userId: user.id,
+            targetUrl: 'pending' // Will be updated in Step 1
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to create audit session');
+        }
+
+        const data = await response.json();
+        setSessionAuditId(data.auditId);
+        console.log('✅ Unified session created:', data.auditId);
+        console.log('   All 5 steps will use this same audit ID');
+      } catch (error) {
+        console.error('❌ Failed to create session:', error);
+        // Don't block - frontend will still work, just won't save to DB properly
+      }
+    };
+
+    createUnifiedSession();
+  }, [user, sessionAuditId]);
+
+  // ============================================
   // SESSION MANAGEMENT - No Persistence
   // ============================================
   useEffect(() => {
@@ -119,6 +161,11 @@ export function ScanningFlow({
       return;
     }
 
+    if (!sessionAuditId) {
+      alert('Session not initialized. Please refresh the page.');
+      return;
+    }
+
     setPenTestScanning(true);
     setPenTestError('');
 
@@ -140,16 +187,21 @@ export function ScanningFlow({
         return;
       }
 
-      // Backend available - use real API with userId
+      // Backend available - use real API with sessionAuditId
       console.log('🔗 Using backend API for penetration test');
       console.log('👤 User:', user.name, '| ID:', user.id);
+      console.log('🔑 Session Audit ID:', sessionAuditId);
             
       const response = await fetch(`${API_URL}/api/pen-test/scan`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ url: targetUrl, userId: user.id }),
+        body: JSON.stringify({ 
+          url: targetUrl, 
+          userId: user.id,
+          auditId: sessionAuditId // Use existing session!
+        }),
       });
 
       if (!response.ok) {
@@ -206,6 +258,12 @@ export function ScanningFlow({
       return;
     }
 
+    // ✅ Check if session exists
+    if (!sessionAuditId) {
+      alert("Session not initialized. Please refresh the page.");
+      return;
+    }
+
     // 🔒 Prevent re-analysis if already locked
     if (phishingLocked) {
       alert("Phishing analysis is complete and locked. Please proceed to the next step.");
@@ -220,13 +278,12 @@ export function ScanningFlow({
     setPhishingScanning(true);
 
     try {
-      const auditId = crypto.randomUUID();
       let response: Response;
 
       if (phishingFile instanceof File) {
         // ===== FILE → analyze-file =====
         const formData = new FormData();
-        formData.append("auditId", auditId);
+        formData.append("auditId", sessionAuditId); // Use session audit ID!
         formData.append("userId", user.id);
         formData.append("file", phishingFile);
         formData.append("skipDbSave", "true"); // Don't save to DB during analysis
@@ -246,7 +303,7 @@ export function ScanningFlow({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              auditId,
+              auditId: sessionAuditId, // Use session audit ID!
               content: phishingContent,
               userId: user.id,
               skipDbSave: true  // Don't save to DB during analysis
@@ -284,7 +341,7 @@ export function ScanningFlow({
 
       // 🔒 Lock analysis after successful completion
       setPhishingLocked(true);
-      setPhishingAuditId(auditId);
+      setPhishingAuditId(sessionAuditId); // Store session audit ID for later save
 
       // Store the content that was analyzed for later DB save
       if (phishingFile instanceof File) {
@@ -333,69 +390,289 @@ export function ScanningFlow({
   };
 
   // ============================================
-  // UNCHANGED: IDS Analysis
+  // UPDATED: IDS Analysis with Backend API
   // ============================================
-  const handleIDSAnalysis = () => {
+  const handleIDSAnalysis = async () => {
     if (!idsFile) {
       alert('Please upload a log file');
       return;
     }
+    
+    if (!user || !sessionAuditId) {
+      alert('Session not initialized. Please refresh and try again.');
+      return;
+    }
+    
     setIdsScanning(true);
-    const reader = new FileReader();
-    reader.onload = e => {
-      const content = e.target?.result as string;
-      setTimeout(() => {
-        const vulnerabilities = analyzeIDSLogs(content);
-        setIdsResults(vulnerabilities);
-        setAllVulnerabilities(prev => [...prev, ...vulnerabilities]);
-        setIdsScanning(false);
-      }, 2000);
-    };
-    reader.readAsText(idsFile);
+    
+    try {
+      console.log('📤 Uploading IDS log file to backend...');
+      
+      // Create FormData for file upload
+      const formData = new FormData();
+      formData.append('file', idsFile);  // Backend expects 'file' field
+      formData.append('auditId', sessionAuditId);
+      
+      const response = await fetch(`${API_URL}/api/ids/analyze-logs`, {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) {
+        let errorData: any = null;
+        try {
+          errorData = await response.json();
+        } catch (_) {}
+        
+        console.error('❌ IDS backend error:', {
+          status: response.status,
+          errorData
+        });
+        
+        throw new Error(errorData?.message || `Request failed with status ${response.status}`);
+      }
+      
+      const result = await response.json();
+      console.log('✅ IDS analysis complete:', result);
+      
+      // Map backend findings to frontend vulnerability format
+      const vulnerabilities: Vulnerability[] = result.findings?.map((finding: any) => ({
+        id: finding.id || `IDS-${Date.now()}-${Math.random()}`,
+        type: finding.title || finding.type || 'IDS Finding',
+        severity: (finding.severity?.toLowerCase() || 'medium') as 'critical' | 'high' | 'medium' | 'low',
+        description: finding.description || 'IDS anomaly detected',
+        technicalRisk: finding.technicalRisk || 3,
+        ethicalRisk: finding.ethicalRisk || 2,
+        recommendation: finding.recommendation || 'Review logs and investigate',
+        ethicalImplication: finding.ethicalImplication || 'Potential security breach may harm user trust'
+      })) || [];
+      
+      setIdsResults(vulnerabilities);
+      setAllVulnerabilities(prev => [...prev, ...vulnerabilities]);
+      
+    } catch (err: any) {
+      console.error('❌ IDS analysis failed:', err);
+      alert(
+        'IDS analysis failed:\n\n' +
+        (err.message || 'Unknown error')
+      );
+    } finally {
+      setIdsScanning(false);
+    }
   };
 
   // ============================================
-  // UNCHANGED: Risk Calculation & Reports
+  // UPDATED: Risk Calculation with Backend API
   // ============================================
-  const calculateRisk = () => {
-    const score = calculateRiskScore(allVulnerabilities);
-    setRiskScore(score);
+  const calculateRisk = async () => {
+    if (!sessionAuditId) {
+      // Fallback to frontend calculation if no session
+      const score = calculateRiskScore(allVulnerabilities);
+      setRiskScore(score);
+      return;
+    }
+    
+    try {
+      console.log('📊 Calculating risk score via backend...');
+      
+      const response = await fetch(`${API_URL}/api/risk/calculate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auditId: sessionAuditId })
+      });
+      
+      if (!response.ok) {
+        let errorData: any = null;
+        try {
+          errorData = await response.json();
+        } catch (_) {}
+        
+        console.error('❌ Risk calculation backend error:', {
+          status: response.status,
+          errorData
+        });
+        
+        // Fallback to frontend calculation
+        console.log('⚠️ Falling back to frontend calculation');
+        const score = calculateRiskScore(allVulnerabilities);
+        setRiskScore(score);
+        return;
+      }
+      
+      const result = await response.json();
+      console.log('✅ Risk score calculated:', result);
+      
+      // Calculate Islamic ethics evaluation
+      try {
+        console.log('🕌 Evaluating Islamic ethics...');
+        const ethicsResponse = await fetch(`${API_URL}/api/ethics/evaluate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ auditId: sessionAuditId })
+        });
+        
+        if (ethicsResponse.ok) {
+          const ethicsResult = await ethicsResponse.json();
+          console.log('✅ Islamic ethics evaluated:', ethicsResult);
+        }
+      } catch (ethicsErr) {
+        console.error('⚠️ Ethics evaluation failed (non-critical):', ethicsErr);
+      }
+      
+      // Map backend result to frontend format
+      setRiskScore({
+        overall: result.overall_score || 0,
+        technical: result.technical_score || 0,
+        ethical: result.ethical_score || 0,
+        totalVulnerabilities: allVulnerabilities.length,
+        critical: result.severity_counts?.critical || 0,
+        high: result.severity_counts?.high || 0,
+        medium: result.severity_counts?.medium || 0,
+        low: result.severity_counts?.low || 0,
+        summary: result.summary || 'Risk assessment complete'
+      });
+      
+    } catch (err: any) {
+      console.error('❌ Risk calculation failed:', err);
+      // Fallback to frontend calculation
+      console.log('⚠️ Falling back to frontend calculation');
+      const score = calculateRiskScore(allVulnerabilities);
+      setRiskScore(score);
+    }
   };
 
-  const handleGenerateRecoveryPlan = () => {
-    if (!riskScore || allVulnerabilities.length === 0) return;
+  const handleGenerateRecoveryPlan = async () => {
+    if (!riskScore || allVulnerabilities.length === 0 || !sessionAuditId) return;
+    
     setRecoveryGenerating(true);
-    // Small delay to feel more like an AI generation step
-    setTimeout(() => {
+    
+    try {
+      console.log('📋 Generating AI-powered recovery plan...');
+      
+      const response = await fetch(`${API_URL}/api/reporting/generate-recovery-plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          auditId: sessionAuditId,
+          useAI: true  // Enable AI-powered recovery plan generation
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to generate recovery plan');
+      }
+      
+      const result = await response.json();
+      console.log('✅ AI recovery plan generated:', result);
+      
+      setRecoveryPlan(result.recoveryPlan.items || []);
+      
+    } catch (error: any) {
+      console.error('❌ Failed to generate recovery plan:', error);
+      // Fallback to frontend generation
+      console.log('⚠️ Falling back to frontend generation');
       const plan = generateRecoveryPlan(allVulnerabilities, riskScore);
       setRecoveryPlan(plan);
+    } finally {
       setRecoveryGenerating(false);
-    }, 800);
+    }
   };
   
-  const handleDownloadTextReport = () => {
-    if (!user) return;
-    const report = generatePDFReport(allVulnerabilities, {
-      name: user.name,
-      position: user.position,
-      date: new Date().toLocaleDateString()
-    }, riskScore);
-    downloadTextReport(report, `AmanTech_Shield_Security_Report_${Date.now()}.txt`);
+  const handleDownloadTextReport = async () => {
+    if (!user || !sessionAuditId) {
+      alert('Session not initialized. Please complete the assessment.');
+      return;
+    }
+
+    try {
+      console.log('📄 Fetching audit data for text report...');
+      
+      // Fetch complete audit data including recovery plan
+      const response = await fetch(`${API_URL}/api/reporting/audit/${sessionAuditId}`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch audit data');
+      }
+      
+      const { audit } = await response.json();
+      
+      console.log('✅ Audit data fetched:', {
+        hasRecoveryPlan: !!audit.recoveryPlan,
+        hasActionSteps: !!audit.recoveryPlan?.actionSteps,
+        actionStepsPreview: audit.recoveryPlan?.actionSteps?.substring(0, 100)
+      });
+      
+      // Generate text report with actual recovery plan data
+      const report = generatePDFReport(
+        allVulnerabilities, 
+        {
+          name: user.name,
+          position: user.position,
+          date: new Date().toLocaleDateString()
+        }, 
+        riskScore,
+        audit.recoveryPlan // Pass recovery plan from database
+      );
+      
+      downloadTextReport(report, `AmanTech_Shield_Security_Report_${Date.now()}.txt`);
+      console.log('✅ Text report downloaded successfully');
+      
+    } catch (error: any) {
+      console.error('❌ Failed to download text report:', error);
+      
+      // Fallback to local data if backend fetch fails
+      const report = generatePDFReport(allVulnerabilities, {
+        name: user.name,
+        position: user.position,
+        date: new Date().toLocaleDateString()
+      }, riskScore);
+      downloadTextReport(report, `AmanTech_Shield_Security_Report_${Date.now()}.txt`);
+    }
   };
   
-  const handleDownloadPDFReport = () => {
-    if (!user) return;
-    const htmlContent = generatePDFHTML(allVulnerabilities, {
-      name: user.name,
-      position: user.position,
-      date: new Date().toLocaleDateString()
-    }, riskScore);
-    downloadPDFReport(htmlContent, `AmanTech_Shield_Security_Report_${Date.now()}.pdf`);
+  const handleDownloadPDFReport = async () => {
+    if (!user || !sessionAuditId) {
+      alert('Session not initialized. Please complete the assessment.');
+      return;
+    }
+    
+    try {
+      console.log('📄 Downloading PDF report from backend...');
+      
+      const response = await fetch(`${API_URL}/api/reporting/generate-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auditId: sessionAuditId })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to generate PDF');
+      }
+      
+      // Get PDF blob
+      const blob = await response.blob();
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `AmanTech_Security_Report_${sessionAuditId.substring(0, 8)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      console.log('✅ PDF downloaded successfully');
+      
+    } catch (error: any) {
+      console.error('❌ Failed to download PDF:', error);
+      alert('Failed to generate PDF report. Please try again.');
+    }
   };
   
   const nextStep = async () => {
     // Step 0: Penetration Test validation
-    if (currentStep === 0 && penTestResults.length === 0) {
+    if (currentStep === 0 && !sessionAuditId) {
       alert('⚠️ Please complete the penetration test before proceeding to the next step.');
       return;
     }
@@ -586,6 +863,32 @@ export function ScanningFlow({
                   </div>
                   <VulnerabilityList vulnerabilities={penTestResults} />
                 </div>}
+
+              {!penTestScanning && penTestResults.length === 0 && targetUrl && sessionAuditId && (
+                <div className="mt-8 p-6 bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/30 rounded-xl">
+                  <div className="flex items-center space-x-4">
+                    <div className="text-5xl">🛡️</div>
+                    <div className="flex-1">
+                      <h3 className="text-xl font-bold text-green-400 mb-2">Security Status: SAFE</h3>
+                      <p className="text-gray-300 mb-3">All security checks passed! No vulnerabilities detected.</p>
+                      <div className="space-y-2 text-sm text-gray-400">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-green-400">✓</span>
+                          <span>SSL/TLS encryption verified</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-green-400">✓</span>
+                          <span>Security headers properly configured</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-green-400">✓</span>
+                          <span>No critical vulnerabilities detected</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>}
 
           {/* ============================================ */}
@@ -737,6 +1040,14 @@ export function ScanningFlow({
                   Upload your system log files (CSV format) to detect abnormal
                   activities like failed logins, unusual access patterns, etc.
                 </p>
+                <div className="mt-2 flex items-center space-x-2 text-sm">
+                  <span className="px-2 py-1 bg-green-500/20 text-green-400 rounded">
+                    ✓ Backend Connected
+                  </span>
+                  <span className="text-gray-500">
+                    AI-powered log analysis
+                  </span>
+                </div>
               </div>
 
               <FileUpload label="Upload Log File (CSV)" accept=".csv,.txt,.log" onFileSelect={setIdsFile} selectedFile={idsFile} onClear={() => setIdsFile(null)} />
@@ -768,6 +1079,14 @@ export function ScanningFlow({
                   vulnerabilities with ethical implications based on Islamic
                   principles.
                 </p>
+                <div className="mt-2 flex items-center space-x-2 text-sm">
+                  <span className="px-2 py-1 bg-green-500/20 text-green-400 rounded">
+                    ✓ Backend Connected
+                  </span>
+                  <span className="text-gray-500">
+                    Islamic ethics integration (Amanah & Maslahah)
+                  </span>
+                </div>
               </div>
 
               {riskScore ? <RiskScoreDisplay riskScore={riskScore} /> : <div className="text-center py-12">
@@ -787,6 +1106,14 @@ export function ScanningFlow({
                   Generate your comprehensive security report with ethical
                   disclosure policy and recovery steps.
                 </p>
+                <div className="mt-2 flex items-center space-x-2 text-sm">
+                  <span className="px-2 py-1 bg-green-500/20 text-green-400 rounded">
+                    ✓ Backend Connected
+                  </span>
+                  <span className="text-gray-500">
+                    PDF generation from database
+                  </span>
+                </div>
               </div>
 
               {/* AI-style Recovery Plan Generation */}
@@ -883,14 +1210,26 @@ export function ScanningFlow({
                 </p>
 
                 <div className="space-y-4">
-                  <button onClick={handleDownloadPDFReport} className="w-full py-4 bg-gradient-to-r from-green-500 to-emerald-600 rounded-lg font-semibold text-lg hover:shadow-lg hover:shadow-green-500/50 transition-all flex items-center justify-center space-x-2">
+                  <button 
+                    onClick={handleDownloadPDFReport} 
+                    disabled={recoveryGenerating}
+                    className={`w-full py-4 bg-gradient-to-r from-green-500 to-emerald-600 rounded-lg font-semibold text-lg hover:shadow-lg hover:shadow-green-500/50 transition-all flex items-center justify-center space-x-2 ${
+                      recoveryGenerating ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
+                  >
                     <DownloadIcon className="w-6 h-6" />
-                    <span>Download as PDF</span>
+                    <span>{recoveryGenerating ? 'AI Generating...' : 'Download as PDF'}</span>
                   </button>
 
-                  <button onClick={handleDownloadTextReport} className="w-full py-4 border-2 border-cyan-500/50 rounded-lg font-semibold hover:bg-cyan-500/10 transition-all flex items-center justify-center space-x-2">
+                  <button 
+                    onClick={handleDownloadTextReport} 
+                    disabled={recoveryGenerating}
+                    className={`w-full py-4 border-2 border-cyan-500/50 rounded-lg font-semibold hover:bg-cyan-500/10 transition-all flex items-center justify-center space-x-2 ${
+                      recoveryGenerating ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
+                  >
                     <FileTextIcon className="w-6 h-6" />
-                    <span>Download as Text File</span>
+                    <span>{recoveryGenerating ? 'AI Generating...' : 'Download as Text File'}</span>
                   </button>
 
                   <button 

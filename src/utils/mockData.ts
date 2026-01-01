@@ -53,8 +53,8 @@ export const teamMembers = [{
   id: 2,
   name: 'Nurul Aishah Irdina Binti Rahman',
   role: 'Chief Technology Officer',
-  email: 'nurul.aishah@amantechshield.tech',
-  image: 'https://api.dicebear.com/7.x/avataaars/svg?seed=NurulAishah&backgroundColor=0066ff'
+  email: 'aishahlurvea@gmail.com',
+  image: '/src/assets/irdina.png'
 }, {
   id: 3,
   name: 'Nuruldiana Binti Zaidi',
@@ -65,20 +65,20 @@ export const teamMembers = [{
   id: 4,
   name: 'Mohamad Denish Jumad Bin Jamil',
   role: 'Lead Penetration Tester',
-  email: 'denish.jumad@amantechshield.tech',
-  image: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Denish&backgroundColor=0066ff'
+  email: 'denishjumad@gmail.com',
+  image: '/src/assets/denish.png'
 }, {
   id: 5,
   name: 'Maslinda Binti Sulaiman',
   role: 'Compliance & Risk Manager',
-  email: 'maslinda.sulaiman@amantechshield.tech',
-  image: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Maslinda&backgroundColor=00d9ff'
+  email: 'Maslinda.ayen@gmail.com',
+  image: '/src/assets/maslinda.png'
 }, {
   id: 6,
   name: 'Julia Natasha Binti Jemuin',
   role: 'Threat Intelligence Analyst',
-  email: 'julia.jemuin@amantechshield.tech',
-  image: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Julia&backgroundColor=0066ff'
+  email: 'julianatasha0307@gmail.com',
+  image: '/src/assets/julia.png'
 }, {
   id: 7,
   name: 'Afiqah Binti Ahmad Fairuze',

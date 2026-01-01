@@ -14,18 +14,22 @@ interface RiskScoreDisplayProps {
 export function RiskScoreDisplay({
   riskScore
 }: RiskScoreDisplayProps) {
+  // Convert 0-5 scale to 0-100 percentage for display
+  const toPercentage = (score: number) => (score / 5) * 100;
+  
   const getRiskLevel = (score: number) => {
-    if (score >= 75) return {
+    // Score is on 0-5 scale
+    if (score >= 4.5) return {
       label: 'Critical',
       color: 'text-red-500',
       bgColor: 'bg-red-500'
     };
-    if (score >= 50) return {
+    if (score >= 4.0) return {
       label: 'High',
       color: 'text-orange-500',
       bgColor: 'bg-orange-500'
     };
-    if (score >= 25) return {
+    if (score >= 3.0) return {
       label: 'Medium',
       color: 'text-yellow-500',
       bgColor: 'bg-yellow-500'
@@ -36,6 +40,7 @@ export function RiskScoreDisplay({
       bgColor: 'bg-green-500'
     };
   };
+  
   const riskLevel = getRiskLevel(riskScore.overall);
   return <div className="space-y-6">
       {/* Overall Risk Score */}
@@ -43,10 +48,11 @@ export function RiskScoreDisplay({
         <ShieldAlertIcon className={`w-16 h-16 mx-auto mb-4 ${riskLevel.color}`} />
         <h2 className="text-4xl font-bold mb-2">
           <span className={riskLevel.color}>
-            {riskScore.overall.toFixed(1)}%
+            {toPercentage(riskScore.overall).toFixed(1)}%
           </span>
         </h2>
-        <p className="text-xl text-gray-300 mb-4">Overall Risk Score</p>
+        <p className="text-xl text-gray-300 mb-2">Overall Risk Score</p>
+        <p className="text-sm text-gray-400 mb-4">({riskScore.overall.toFixed(2)} out of 5.0)</p>
         <div className={`inline-block px-6 py-2 rounded-full ${riskLevel.bgColor}/20 ${riskLevel.color} font-bold text-lg`}>
           {riskLevel.label} Risk
         </div>

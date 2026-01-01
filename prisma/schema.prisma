@@ -33,7 +33,6 @@ model AuditSession {
   idsLogs          IDSLab[]
   ethics           IslamicEthicsEvaluation?
   recoveryPlan     RecoveryPlan?
-  report           AuditReport?
   riskScore        RiskScore?
 }
 
@@ -43,6 +42,7 @@ model PenetrationTestResult {
   audit             AuditSession @relation(fields: [auditId], references: [id], onDelete: Cascade)
   vulnerabilityType String
   technicalRisk     Int
+  createdAt         DateTime     @default(now())
 }
 
 model PhishingAnalysis {
@@ -53,6 +53,7 @@ model PhishingAnalysis {
   isPhishing         Boolean      @default(false)
   riskScore          Float?
   suspiciousPatterns String[]     @default([])
+  createdAt          DateTime     @default(now())
 }
 
 model IDSLab {
@@ -61,6 +62,7 @@ model IDSLab {
   audit          AuditSession @relation(fields: [auditId], references: [id], onDelete: Cascade)
   anomaliesFound String?
   failedAttempts Int          @default(0)
+  createdAt      DateTime     @default(now())
 }
 
 model IslamicEthicsEvaluation {
@@ -70,6 +72,7 @@ model IslamicEthicsEvaluation {
   amanahScore     Float?
   maslahahScore   Float?
   complianceLevel String?
+  createdAt       DateTime     @default(now())
 }
 
 model RecoveryPlan {
@@ -78,14 +81,7 @@ model RecoveryPlan {
   audit            AuditSession @relation(fields: [auditId], references: [id], onDelete: Cascade)
   actionSteps      String?
   disclosurePolicy String?
-}
-
-model AuditReport {
-  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  auditId       String       @unique @db.Uuid
-  audit         AuditSession @relation(fields: [auditId], references: [id], onDelete: Cascade)
-  reportFileUrl String
-  generatedAt   DateTime     @default(now())
+  createdAt        DateTime     @default(now())
 }
 
 model RiskScore {

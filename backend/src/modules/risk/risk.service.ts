@@ -23,14 +23,16 @@ function calculateTechnicalScore(findings: {
   idsLogs: Array<{ failedAttempts: number }>;
 }): { score: number; counts: { critical: number; high: number; medium: number; low: number } } {
   const counts = { critical: 0, high: 0, medium: 0, low: 0 };
-  let totalScore = 0;
+  let weightedScore = 0;
   let totalFindings = 0;
 
   // Process penetration test results
   findings.penTests.forEach((penTest) => {
     const severity = getVulnerabilitySeverity(penTest.technicalRisk);
     counts[severity as keyof typeof counts]++;
-    totalScore += penTest.technicalRisk;
+    
+    // Use weighted scoring based on severity
+    weightedScore += penTest.technicalRisk * SEVERITY_WEIGHTS[severity as keyof typeof SEVERITY_WEIGHTS] / 5;
     totalFindings++;
   });
 
@@ -38,7 +40,7 @@ function calculateTechnicalScore(findings: {
   findings.phishingScans.forEach((scan) => {
     if (scan.isPhishing) {
       counts.high++;
-      totalScore += 4;
+      weightedScore += 4 * SEVERITY_WEIGHTS.high / 5;
       totalFindings++;
     }
   });
@@ -47,24 +49,38 @@ function calculateTechnicalScore(findings: {
   findings.idsLogs.forEach((log) => {
     if (log.failedAttempts > 10) {
       counts.critical++;
-      totalScore += 5;
+      weightedScore += 5 * SEVERITY_WEIGHTS.critical / 5;
       totalFindings++;
     } else if (log.failedAttempts > 5) {
       counts.high++;
-      totalScore += 4;
+      weightedScore += 4 * SEVERITY_WEIGHTS.high / 5;
       totalFindings++;
     } else if (log.failedAttempts > 0) {
       counts.medium++;
-      totalScore += 3;
+      weightedScore += 3 * SEVERITY_WEIGHTS.medium / 5;
       totalFindings++;
     }
   });
 
-  // Calculate average score (0-5 scale)
-  const averageScore = totalFindings > 0 ? totalScore / totalFindings : 0;
+  // Calculate base score (0-5 scale)
+  let finalScore = totalFindings > 0 ? weightedScore / totalFindings : 0;
+  
+  // Apply minimum thresholds based on severity counts
+  // If you have critical vulnerabilities, score should be at least 4.0
+  if (counts.critical > 0) {
+    finalScore = Math.max(finalScore, 4.0 + (counts.critical * 0.2));
+  } 
+  // If you have 3+ high vulnerabilities, score should be at least 3.5
+  else if (counts.high >= 3) {
+    finalScore = Math.max(finalScore, 3.5 + (counts.high * 0.1));
+  }
+  // If you have 2+ high vulnerabilities, score should be at least 3.0
+  else if (counts.high >= 2) {
+    finalScore = Math.max(finalScore, 3.0);
+  }
 
   return {
-    score: Math.min(averageScore, 5),
+    score: Math.min(finalScore, 5),
     counts,
   };
 }
@@ -76,41 +92,55 @@ function calculateEthicalScore(findings: {
   idsLogs: Array<{ failedAttempts: number }>;
   ethics?: { amanahScore: number | null; maslahahScore: number | null } | null;
 }): number {
-  let amanahScore = 0; // Trust/Integrity violations
-  let maslahahScore = 0; // Public harm/welfare impact
-
-  // Amanah (Trust) Assessment
-  // Vulnerabilities that breach user trust
-  const trustViolations = findings.penTests.filter(
-    (test) =>
-      test.vulnerabilityType.toLowerCase().includes('password') ||
-      test.vulnerabilityType.toLowerCase().includes('auth') ||
-      test.vulnerabilityType.toLowerCase().includes('session')
-  ).length;
-
-  amanahScore = Math.min((trustViolations / 3) * 5, 5); // Normalize to 0-5
-
-  // Maslahah (Public Welfare) Assessment
-  // High technical risk = high potential harm to users
-  const highRiskCount = findings.penTests.filter((test) => test.technicalRisk >= 4).length;
-  const phishingRisk = findings.phishingScans.filter((scan) => scan.isPhishing).length;
-  const intrusionRisk = findings.idsLogs.filter((log) => log.failedAttempts > 5).length;
-
-  const totalHarmPotential = highRiskCount + phishingRisk + intrusionRisk;
-  maslahahScore = Math.min((totalHarmPotential / 5) * 5, 5); // Normalize to 0-5
-
-  // Use existing Islamic ethics evaluation if available
-  if (findings.ethics) {
-    if (findings.ethics.amanahScore !== null && findings.ethics.amanahScore !== undefined) {
-      amanahScore = findings.ethics.amanahScore;
-    }
-    if (findings.ethics.maslahahScore !== null && findings.ethics.maslahahScore !== undefined) {
-      maslahahScore = findings.ethics.maslahahScore;
-    }
+  // If Islamic ethics evaluation exists, use those scores
+  if (findings.ethics?.amanahScore !== null && findings.ethics?.amanahScore !== undefined &&
+      findings.ethics?.maslahahScore !== null && findings.ethics?.maslahahScore !== undefined) {
+    return (findings.ethics.amanahScore + findings.ethics.maslahahScore) / 2;
   }
 
+  // Fallback calculation if no ethics evaluation
+  let amanahScore = 0; // Trust/Integrity violations (lower is better)
+  let maslahahScore = 0; // Public harm/welfare impact (lower is better)
+
+  // Amanah (Trust) Assessment - violations that breach user trust
+  const authViolations = findings.penTests.filter(
+    (test) =>
+      /password|auth|session|credential|login|token|encryption|data\s*breach/i.test(test.vulnerabilityType)
+  );
+  
+  // Weight by severity
+  let amanahViolationScore = 0;
+  authViolations.forEach(v => {
+    if (v.technicalRisk >= 5) amanahViolationScore += 1.5;
+    else if (v.technicalRisk >= 4) amanahViolationScore += 1.0;
+    else if (v.technicalRisk >= 3) amanahViolationScore += 0.5;
+  });
+  
+  amanahScore = Math.min(amanahViolationScore, 5);
+
+  // Maslahah (Public Welfare) Assessment - potential harm to users
+  let maslahahHarmScore = 0;
+  
+  // High technical risk vulnerabilities = high harm potential
+  const criticalVulns = findings.penTests.filter(test => test.technicalRisk >= 5).length;
+  const highVulns = findings.penTests.filter(test => test.technicalRisk >= 4 && test.technicalRisk < 5).length;
+  
+  maslahahHarmScore += criticalVulns * 1.5;  // Critical = 1.5 points each
+  maslahahHarmScore += highVulns * 1.0;      // High = 1.0 point each
+  
+  // Phishing threats harm public trust
+  const phishingCount = findings.phishingScans.filter(scan => scan.isPhishing).length;
+  maslahahHarmScore += phishingCount * 0.8;
+  
+  // Intrusion attempts threaten user security
+  const intrusionCount = findings.idsLogs.filter(log => log.failedAttempts > 5).length;
+  maslahahHarmScore += intrusionCount * 0.7;
+
+  maslahahScore = Math.min(maslahahHarmScore, 5);
+
   // Average of both Islamic ethics dimensions
-  return (amanahScore + maslahahScore) / 2;
+  // Higher scores mean higher ethical risk (worse)
+  return Math.min((amanahScore + maslahahScore) / 2, 5);
 }
 
 // Generate risk summary message
@@ -127,20 +157,40 @@ function generateSummary(
   if (counts.high > 0) {
     issues.push(`${counts.high} high-risk issue${counts.high > 1 ? 's' : ''}`);
   }
+  if (counts.medium > 0) {
+    issues.push(`${counts.medium} medium-risk issue${counts.medium > 1 ? 's' : ''}`);
+  }
 
+  // Determine overall risk level based on both scores
+  const maxScore = Math.max(technicalScore, ethicalScore);
   let riskLevel = 'Low';
-  if (technicalScore >= 4 || ethicalScore >= 4) riskLevel = 'High';
-  else if (technicalScore >= 3 || ethicalScore >= 3) riskLevel = 'Medium';
+  let urgency = '';
+  
+  if (counts.critical > 0 || maxScore >= 4.5) {
+    riskLevel = 'Critical';
+    urgency = 'IMMEDIATE ACTION REQUIRED. ';
+  } else if (maxScore >= 4.0 || counts.high >= 3) {
+    riskLevel = 'High';
+    urgency = 'Urgent remediation needed. ';
+  } else if (maxScore >= 3.0 || counts.high >= 1) {
+    riskLevel = 'Medium';
+    urgency = 'Timely remediation recommended. ';
+  }
 
-  const issueText = issues.length > 0 ? issues.join(' and ') : 'No major issues found';
-  const ethicalImpact =
-    ethicalScore >= 4
-      ? 'Significant ethical harm to user trust and welfare (Amanah and Maslahah principles violated).'
-      : ethicalScore >= 3
-        ? 'Moderate ethical concerns regarding user trust.'
-        : 'Minimal ethical impact.';
+  const issueText = issues.length > 0 ? issues.join(', ') + ' detected' : 'No major issues found';
+  
+  let ethicalImpact = '';
+  if (ethicalScore >= 4) {
+    ethicalImpact = ' Significant breach of Islamic ethical principles (Amanah & Maslahah) - user trust and welfare at risk.';
+  } else if (ethicalScore >= 3) {
+    ethicalImpact = ' Moderate ethical concerns regarding user trust and data protection.';
+  } else if (ethicalScore >= 2) {
+    ethicalImpact = ' Minor ethical considerations present.';
+  } else {
+    ethicalImpact = ' Minimal ethical impact.';
+  }
 
-  return `${riskLevel} risk detected. ${issueText}. ${ethicalImpact}`;
+  return `${urgency}${riskLevel} risk level. ${issueText}.${ethicalImpact}`;
 }
 
 // Main function to calculate risk score for an audit session
@@ -175,8 +225,21 @@ export async function calculateRiskScore(auditId: string) {
     ethics: audit.ethics,
   });
 
-  // Calculate overall score (weighted average: 60% technical, 40% ethical)
-  const overallScore = technical.score * 0.6 + ethicalScore * 0.4;
+  // Calculate overall score (weighted average: 70% technical, 30% ethical)
+  // Technical vulnerabilities are the primary risk, ethical impact amplifies it
+  let overallScore = technical.score * 0.7 + ethicalScore * 0.3;
+  
+  // Apply minimum overall score based on severity
+  if (technical.counts.critical > 0) {
+    overallScore = Math.max(overallScore, 4.0);
+  } else if (technical.counts.high >= 3) {
+    overallScore = Math.max(overallScore, 3.5);
+  } else if (technical.counts.high >= 2) {
+    overallScore = Math.max(overallScore, 3.0);
+  }
+  
+  // Cap at 5.0
+  overallScore = Math.min(overallScore, 5.0);
 
   // Generate summary
   const summary = generateSummary(technical.score, ethicalScore, technical.counts);

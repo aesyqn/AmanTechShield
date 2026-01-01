@@ -4,7 +4,12 @@ export interface AuditorDetails {
   position: string;
   date: string;
 }
-export function generatePDFReport(vulnerabilities: Vulnerability[], auditor: AuditorDetails, riskScore: any): string {
+
+export interface RecoveryPlanData {
+  actionSteps?: string;
+  disclosurePolicy?: string;
+}
+export function generatePDFReport(vulnerabilities: Vulnerability[], auditor: AuditorDetails, riskScore: any, recoveryPlanData?: RecoveryPlanData): string {
   // Generate formatted text report
   const report = `
 ═══════════════════════════════════════════════════════════════
@@ -57,20 +62,7 @@ Communication Channel:  Secure Email (PGP-encrypted)
 
 RECOVERY PLAN
 ───────────────────────────────────────────────────────────────
-Immediate Actions (0-24 hours):
-1. Address all CRITICAL vulnerabilities immediately
-2. Implement temporary security measures
-3. Notify affected stakeholders
-
-Short-term Actions (1-7 days):
-1. Patch all HIGH severity vulnerabilities
-2. Conduct security awareness training
-3. Update security policies and procedures
-
-Long-term Actions (1-3 months):
-1. Resolve MEDIUM and LOW severity issues
-2. Implement continuous monitoring
-3. Schedule follow-up security audit
+${generateRecoveryPlanText(recoveryPlanData)}
 
 ISLAMIC ETHICAL ALIGNMENT
 ───────────────────────────────────────────────────────────────
@@ -92,6 +84,67 @@ Confidential - For Internal Use Only
 ═══════════════════════════════════════════════════════════════
   `;
   return report;
+}
+
+// Helper function to format recovery plan for text report
+function generateRecoveryPlanText(recoveryPlanData?: RecoveryPlanData): string {
+  console.log('🔍 generateRecoveryPlanText called with:', {
+    hasData: !!recoveryPlanData,
+    hasActionSteps: !!recoveryPlanData?.actionSteps,
+    actionStepsType: typeof recoveryPlanData?.actionSteps,
+    actionStepsLength: recoveryPlanData?.actionSteps?.length
+  });
+
+  if (!recoveryPlanData || !recoveryPlanData.actionSteps) {
+    console.log('⚠️ No recovery plan data, using fallback');
+    // Fallback to generic recovery plan
+    return `Immediate Actions (0-24 hours):
+1. Address all CRITICAL vulnerabilities immediately
+2. Implement temporary security measures
+3. Notify affected stakeholders
+
+Short-term Actions (1-7 days):
+1. Patch all HIGH severity vulnerabilities
+2. Conduct security awareness training
+3. Update security policies and procedures
+
+Long-term Actions (1-3 months):
+1. Resolve MEDIUM and LOW severity issues
+2. Implement continuous monitoring
+3. Schedule follow-up security audit`;
+  }
+
+  try {
+    const actionSteps = JSON.parse(recoveryPlanData.actionSteps);
+    console.log('✅ Parsed action steps:', { count: actionSteps.length });
+    
+    const phases = [
+      { key: 'immediate', label: 'Immediate Actions (0-24 hours):' },
+      { key: 'short_term', label: 'Short-term Actions (1-7 days):' },
+      { key: 'long_term', label: 'Long-term Actions (1-3 months):' }
+    ];
+
+    let text = '';
+    phases.forEach((phase, phaseIndex) => {
+      const items = actionSteps.filter((item: any) => item.phase === phase.key);
+      if (items.length > 0) {
+        if (phaseIndex > 0) text += '\n\n';
+        text += phase.label + '\n';
+        items.forEach((item: any, index: number) => {
+          text += `${index + 1}. ${item.title}\n`;
+          text += `   ${item.description}\n`;
+          if (item.timeline) {
+            text += `   Timeline: ${item.timeline}\n`;
+          }
+        });
+      }
+    });
+
+    return text || 'No recovery plan generated.';
+  } catch (error) {
+    console.error('Failed to parse recovery plan:', error);
+    return 'Error loading recovery plan. Please contact support.';
+  }
 }
 
 // Generate HTML content for PDF conversion
@@ -118,45 +171,47 @@ export function generatePDFHTML(vulnerabilities: Vulnerability[], auditor: Audit
     body { 
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       color: #1a1a1a;
-      line-height: 1.6;
-      padding: 40px;
+      line-height: 1.4;
+      padding: 20px 30px;
       background: white;
+      font-size: 11px;
     }
     .header {
       text-align: center;
-      border-bottom: 4px solid #00D9FF;
-      padding-bottom: 30px;
-      margin-bottom: 40px;
+      border-bottom: 3px solid #00D9FF;
+      padding-bottom: 12px;
+      margin-bottom: 20px;
     }
     .header h1 {
-      font-size: 32px;
+      font-size: 22px;
       color: #0A0E27;
-      margin-bottom: 10px;
+      margin-bottom: 4px;
       font-weight: 800;
     }
     .header .subtitle {
-      font-size: 14px;
+      font-size: 10px;
       color: #666;
       text-transform: uppercase;
-      letter-spacing: 2px;
+      letter-spacing: 1.5px;
     }
     .section {
-      margin-bottom: 40px;
+      margin-bottom: 20px;
       page-break-inside: avoid;
     }
     .section-title {
-      font-size: 20px;
+      font-size: 14px;
       color: #00D9FF;
-      border-left: 4px solid #00D9FF;
-      padding-left: 15px;
-      margin-bottom: 20px;
+      border-left: 3px solid #00D9FF;
+      padding-left: 10px;
+      margin-bottom: 10px;
       font-weight: 700;
     }
     .info-grid {
       display: grid;
-      grid-template-columns: 200px 1fr;
-      gap: 10px;
-      margin-bottom: 20px;
+      grid-template-columns: 140px 1fr;
+      gap: 6px 12px;
+      margin-bottom: 12px;
+      font-size: 10px;
     }
     .info-label {
       font-weight: 600;
@@ -168,113 +223,118 @@ export function generatePDFHTML(vulnerabilities: Vulnerability[], auditor: Audit
     .stats-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 20px;
-      margin: 30px 0;
+      gap: 10px;
+      margin: 12px 0;
     }
     .stat-card {
       background: #f8f9fa;
-      padding: 20px;
-      border-radius: 8px;
+      padding: 10px;
+      border-radius: 6px;
       text-align: center;
-      border-left: 4px solid #00D9FF;
+      border-left: 3px solid #00D9FF;
     }
     .stat-value {
-      font-size: 36px;
+      font-size: 24px;
       font-weight: 800;
       color: #00D9FF;
-      margin-bottom: 5px;
+      margin-bottom: 2px;
     }
     .stat-label {
-      font-size: 12px;
+      font-size: 9px;
       color: #666;
       text-transform: uppercase;
-      letter-spacing: 1px;
+      letter-spacing: 0.5px;
     }
     .vulnerability {
       background: #f8f9fa;
-      border-left: 4px solid;
-      padding: 25px;
-      margin-bottom: 25px;
-      border-radius: 0 8px 8px 0;
+      border-left: 3px solid;
+      padding: 12px 15px;
+      margin-bottom: 12px;
+      border-radius: 0 6px 6px 0;
       page-break-inside: avoid;
     }
     .vuln-header {
       display: flex;
       justify-content: space-between;
       align-items: start;
-      margin-bottom: 15px;
+      margin-bottom: 8px;
     }
     .vuln-title {
-      font-size: 18px;
+      font-size: 12px;
       font-weight: 700;
       color: #1a1a1a;
-      margin-bottom: 5px;
+      margin-bottom: 2px;
     }
     .vuln-id {
-      font-size: 12px;
+      font-size: 9px;
       color: #666;
       font-family: 'Courier New', monospace;
     }
     .severity-badge {
-      padding: 6px 12px;
-      border-radius: 4px;
-      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 3px;
+      font-size: 9px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 1px;
+      letter-spacing: 0.5px;
       color: white;
     }
     .risk-scores {
       display: flex;
-      gap: 20px;
-      margin: 15px 0;
-      font-size: 14px;
+      gap: 15px;
+      margin: 6px 0;
+      font-size: 10px;
     }
     .risk-score {
       font-weight: 600;
     }
     .vuln-section {
-      margin: 15px 0;
+      margin: 8px 0;
     }
     .vuln-section-title {
-      font-size: 13px;
+      font-size: 10px;
       font-weight: 700;
       color: #666;
       text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 8px;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
     }
     .vuln-section-content {
       color: #333;
-      line-height: 1.8;
+      line-height: 1.5;
+      font-size: 10px;
     }
     .ethical-box {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
-      padding: 30px;
-      border-radius: 8px;
-      margin: 30px 0;
+      padding: 15px;
+      border-radius: 6px;
+      margin: 15px 0;
     }
     .ethical-box h3 {
-      font-size: 20px;
-      margin-bottom: 15px;
+      font-size: 13px;
+      margin-bottom: 8px;
     }
     .ethical-quote {
       font-style: italic;
-      font-size: 16px;
-      margin: 15px 0;
-      padding-left: 20px;
-      border-left: 3px solid rgba(255,255,255,0.5);
+      font-size: 10px;
+      margin: 8px 0;
+      padding-left: 12px;
+      border-left: 2px solid rgba(255,255,255,0.5);
+    }
+    .ethical-box p {
+      font-size: 10px;
+      line-height: 1.5;
     }
     .recovery-list {
       list-style: none;
       padding: 0;
     }
     .recovery-list li {
-      padding: 12px 0;
-      padding-left: 30px;
+      padding: 6px 0 6px 20px;
       position: relative;
       border-bottom: 1px solid #e0e0e0;
+      font-size: 10px;
     }
     .recovery-list li:before {
       content: "✓";
@@ -282,15 +342,25 @@ export function generatePDFHTML(vulnerabilities: Vulnerability[], auditor: Audit
       left: 0;
       color: #00D9FF;
       font-weight: bold;
-      font-size: 18px;
+      font-size: 12px;
+    }
+    .recovery-section h3 {
+      margin: 12px 0 6px 0;
+      font-size: 11px;
+      font-weight: 700;
     }
     .footer {
-      margin-top: 60px;
-      padding-top: 30px;
+      margin-top: 20px;
+      padding-top: 15px;
       border-top: 2px solid #e0e0e0;
       text-align: center;
       color: #666;
-      font-size: 12px;
+      font-size: 9px;
+    }
+    .two-column {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
     }
   </style>
 </head>
@@ -328,17 +398,21 @@ export function generatePDFHTML(vulnerabilities: Vulnerability[], auditor: Audit
         <div class="stat-label">Ethical Risk</div>
       </div>
     </div>
-    <div class="info-grid">
-      <div class="info-label">Total Vulnerabilities:</div>
-      <div class="info-value">${vulnerabilities.length}</div>
-      <div class="info-label">Critical:</div>
-      <div class="info-value" style="color: #FF0055; font-weight: 700;">${riskScore.critical}</div>
-      <div class="info-label">High:</div>
-      <div class="info-value" style="color: #FF6B35; font-weight: 700;">${riskScore.high}</div>
-      <div class="info-label">Medium:</div>
-      <div class="info-value" style="color: #F7B801; font-weight: 700;">${riskScore.medium}</div>
-      <div class="info-label">Low:</div>
-      <div class="info-value" style="color: #0066FF; font-weight: 700;">${riskScore.low}</div>
+    <div class="two-column">
+      <div class="info-grid">
+        <div class="info-label">Total Vulnerabilities:</div>
+        <div class="info-value">${vulnerabilities.length}</div>
+        <div class="info-label">Critical:</div>
+        <div class="info-value" style="color: #FF0055; font-weight: 700;">${riskScore.critical}</div>
+        <div class="info-label">High:</div>
+        <div class="info-value" style="color: #FF6B35; font-weight: 700;">${riskScore.high}</div>
+      </div>
+      <div class="info-grid">
+        <div class="info-label">Medium:</div>
+        <div class="info-value" style="color: #F7B801; font-weight: 700;">${riskScore.medium}</div>
+        <div class="info-label">Low:</div>
+        <div class="info-value" style="color: #0066FF; font-weight: 700;">${riskScore.low}</div>
+      </div>
     </div>
   </div>
 
@@ -389,26 +463,32 @@ export function generatePDFHTML(vulnerabilities: Vulnerability[], auditor: Audit
     </div>
   </div>
 
-  <div class="section">
+  <div class="section recovery-section">
     <h2 class="section-title">Recovery Plan</h2>
-    <h3 style="margin: 20px 0 10px 0; font-size: 16px;">Immediate Actions (0-24 hours)</h3>
-    <ul class="recovery-list">
-      <li>Address all CRITICAL vulnerabilities immediately</li>
-      <li>Implement temporary security measures</li>
-      <li>Notify affected stakeholders</li>
-    </ul>
-    <h3 style="margin: 20px 0 10px 0; font-size: 16px;">Short-term Actions (1-7 days)</h3>
-    <ul class="recovery-list">
-      <li>Patch all HIGH severity vulnerabilities</li>
-      <li>Conduct security awareness training</li>
-      <li>Update security policies and procedures</li>
-    </ul>
-    <h3 style="margin: 20px 0 10px 0; font-size: 16px;">Long-term Actions (1-3 months)</h3>
-    <ul class="recovery-list">
-      <li>Resolve MEDIUM and LOW severity issues</li>
-      <li>Implement continuous monitoring</li>
-      <li>Schedule follow-up security audit</li>
-    </ul>
+    <div class="two-column">
+      <div>
+        <h3>Immediate (0-24h)</h3>
+        <ul class="recovery-list">
+          <li>Address CRITICAL vulnerabilities</li>
+          <li>Implement temporary measures</li>
+          <li>Notify stakeholders</li>
+        </ul>
+        <h3>Long-term (1-3 months)</h3>
+        <ul class="recovery-list">
+          <li>Resolve MEDIUM/LOW issues</li>
+          <li>Continuous monitoring</li>
+          <li>Follow-up audit</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Short-term (1-7 days)</h3>
+        <ul class="recovery-list">
+          <li>Patch HIGH vulnerabilities</li>
+          <li>Security awareness training</li>
+          <li>Update security policies</li>
+        </ul>
+      </div>
+    </div>
   </div>
 
   <div class="ethical-box">
@@ -420,19 +500,14 @@ export function generatePDFHTML(vulnerabilities: Vulnerability[], auditor: Audit
       This disclosure respects <strong>Maslahah</strong> (public benefit) and <strong>Amanah</strong> (trust) 
       by preventing harm to users before public exposure.
     </p>
-    <p style="margin-top: 15px;">
-      <strong>Key Ethical Principles Applied:</strong><br>
-      • Amanah (Trust): Protecting customer data as a sacred trust<br>
-      • Maslahah (Public Benefit): Prioritizing user safety over convenience<br>
-      • Ihsan (Excellence): Pursuing the highest security standards<br>
-      • Adl (Justice): Fair and transparent disclosure practices
+    <p style="margin-top: 8px;">
+      <strong>Key Principles:</strong>
+      • Amanah (Trust) • Maslahah (Public Benefit) • Ihsan (Excellence) • Adl (Justice)
     </p>
   </div>
 
   <div class="footer">
-    <p>Report Generated: ${new Date().toLocaleString()}</p>
-    <p style="margin-top: 10px;">Confidential - For Internal Use Only</p>
-    <p style="margin-top: 5px;">© ${new Date().getFullYear()} AmanTech Shield. All rights reserved.</p>
+    <p>Report Generated: ${new Date().toLocaleString()} | Confidential - Internal Use Only | © ${new Date().getFullYear()} AmanTech Shield</p>
   </div>
 </body>
 </html>

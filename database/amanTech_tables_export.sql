@@ -67,17 +67,6 @@ SET default_tablespace = '';
 SET default_table_access_method = "heap";
 
 
-CREATE TABLE IF NOT EXISTS "public"."AuditReport" (
-    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
-    "auditId" "uuid" NOT NULL,
-    "reportFileUrl" "text" NOT NULL,
-    "generatedAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
-);
-
-
-ALTER TABLE "public"."AuditReport" OWNER TO "postgres";
-
-
 CREATE TABLE IF NOT EXISTS "public"."AuditSession" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "userId" "uuid" NOT NULL,
@@ -95,7 +84,8 @@ CREATE TABLE IF NOT EXISTS "public"."IDSLab" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "auditId" "uuid" NOT NULL,
     "anomaliesFound" "text",
-    "failedAttempts" integer DEFAULT 0 NOT NULL
+    "failedAttempts" integer DEFAULT 0 NOT NULL,
+    "createdAt" timestamp with time zone DEFAULT "now"()
 );
 
 
@@ -107,7 +97,8 @@ CREATE TABLE IF NOT EXISTS "public"."IslamicEthicsEvaluation" (
     "auditId" "uuid" NOT NULL,
     "amanahScore" double precision,
     "maslahahScore" double precision,
-    "complianceLevel" "text"
+    "complianceLevel" "text",
+    "createdAt" timestamp with time zone DEFAULT "now"()
 );
 
 
@@ -119,7 +110,7 @@ CREATE TABLE IF NOT EXISTS "public"."PenetrationTestResult" (
     "auditId" "uuid" NOT NULL,
     "vulnerabilityType" "text" NOT NULL,
     "technicalRisk" integer NOT NULL,
-    "severityLabel" "public"."SeverityLabel",
+    "createdAt" timestamp with time zone DEFAULT "now"(),
     CONSTRAINT "PenetrationTestResult_technicalRisk_check" CHECK ((("technicalRisk" >= 1) AND ("technicalRisk" <= 5)))
 );
 
@@ -133,7 +124,8 @@ CREATE TABLE IF NOT EXISTS "public"."PhishingAnalysis" (
     "detectedKeywords" "text"[],
     "isPhishing" boolean DEFAULT false NOT NULL,
     "riskScore" double precision,
-    "suspiciousPatterns" "text"[]
+    "suspiciousPatterns" "text"[],
+    "createdAt" timestamp with time zone DEFAULT "now"()
 );
 
 
@@ -144,7 +136,8 @@ CREATE TABLE IF NOT EXISTS "public"."RecoveryPlan" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "auditId" "uuid" NOT NULL,
     "actionSteps" "text",
-    "disclosurePolicy" "text"
+    "disclosurePolicy" "text",
+    "createdAt" timestamp with time zone DEFAULT "now"()
 );
 
 
@@ -162,16 +155,6 @@ CREATE TABLE IF NOT EXISTS "public"."User" (
 
 
 ALTER TABLE "public"."User" OWNER TO "postgres";
-
-
-ALTER TABLE ONLY "public"."AuditReport"
-    ADD CONSTRAINT "AuditReport_auditId_key" UNIQUE ("auditId");
-
-
-
-ALTER TABLE ONLY "public"."AuditReport"
-    ADD CONSTRAINT "AuditReport_pkey" PRIMARY KEY ("id");
-
 
 
 ALTER TABLE ONLY "public"."AuditSession"
@@ -221,11 +204,6 @@ ALTER TABLE ONLY "public"."User"
 
 ALTER TABLE ONLY "public"."User"
     ADD CONSTRAINT "User_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."AuditReport"
-    ADD CONSTRAINT "AuditReport_auditId_fkey" FOREIGN KEY ("auditId") REFERENCES "public"."AuditSession"("id") ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 
